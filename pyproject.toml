@@ -1,0 +1,22 @@
+# Python project settings for the late-delivery prediction platform.
+# Dependencies are added by the commits that need them. Lint with: uvx ruff check .
+
+[project]
+name = "late-delivery-prediction"
+version = "0.1.0"
+description = "EDAI-1 data platform for LastLeg Logistics, a fictional Los Angeles last-mile carrier"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = []
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+# D = pydocstyle: every module, class and function needs a docstring (rubric: docstrings on
+# every function/class and a description at the top of every file).
+select = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

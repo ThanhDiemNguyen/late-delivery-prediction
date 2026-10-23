@@ -1,0 +1,20 @@
+# Files and folders that git must never track. This repository is public.
+
+# Local secrets: only .env.example (placeholders) is committed.
+.env
+.env.*
+!.env.example
+
+# Generated data and local service state.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+
+# Editors and macOS
+.DS_Store
+.idea/
