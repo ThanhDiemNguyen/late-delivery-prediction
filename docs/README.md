@@ -8,4 +8,4 @@ Documents are added here as each part is built.
 
 | Document | Covers |
 |---|---|
-| (none yet) | The first document arrives with the core services. |
+| [core_services.md](core_services.md) | Postgres, SeaweedFS and Kafka: what they hold, how to start them, verification, pitfalls |

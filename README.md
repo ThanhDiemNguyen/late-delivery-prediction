@@ -33,16 +33,28 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 
 ## Architecture
 
-The deployment diagram is added as the services are built. The first services (Postgres,
-SeaweedFS and Kafka) arrive in the next commit.
+The full deployment diagram is added once all the services exist. The deployable units built so
+far are all in the `core` Compose profile ([details](docs/core_services.md)):
+
+| Unit | Role |
+|---|---|
+| Postgres 16 | source database `oms` (order system), plus the `dwh`, `airflow`, `metastore` and `datahub` databases |
+| SeaweedFS | S3 object store: bucket `app-exports` (courier-app exports, a source) and bucket `lakehouse` |
+| Kafka (KRaft) | live parcel-scan events and Flink output topics |
+
+Start them with `cp .env.example .env` (then change the passwords) and
+`docker compose --profile core up -d --wait`.
 
 ## Repo structure
 
 ```text
 .
-├── README.md        this file: domain, architecture, structure, links to docs
-├── docs/            one document per major part, linked from docs/README.md
-├── pyproject.toml   Python project settings and the ruff lint rules
+├── README.md            this file: domain, architecture, structure, links to docs
+├── docker-compose.yaml  every service, grouped by Compose profile (core so far)
+├── infra/
+│   └── postgres/init/   SQL run on the first start of Postgres (creates the databases)
+├── docs/                one document per major part, linked from docs/README.md
+├── pyproject.toml       Python project settings and the ruff lint rules
 ├── .env.example     template for the local .env file (the real .env is never committed)
 └── .gitignore       files and folders that git must never track
 ```

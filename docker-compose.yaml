@@ -1,0 +1,117 @@
+# Docker Compose stack for the late-delivery prediction platform.
+# Each group of services has a profile. Start the core services with:
+#   docker compose --profile core up -d
+# Values such as ${POSTGRES_USER} come from the local .env file (copy .env.example).
+# Every port binds to 127.0.0.1, so nothing is reachable from outside this Mac.
+
+name: ${COMPOSE_PROJECT_NAME:-late-delivery-prediction}
+
+services:
+  # ---------- core: the source systems and the event broker ----------
+
+  # One Postgres server with five databases (created by infra/postgres/init/):
+  # oms (the order system, a source), dwh (the warehouse), airflow, metastore, datahub.
+  postgres:
+    image: postgres:16.15
+    profiles: [core]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:15432:5432"   # 15432 on the Mac, because a local Postgres already uses 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 5s
+      retries: 20
+
+  # SeaweedFS: S3-compatible object storage for the app exports and the lakehouse.
+  # The admin S3 identity comes from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+  # -volume.max=0 sizes the volume count from free disk; the default (8 x 30 GB) caps it at 240 GB.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    profiles: [core]
+    command: server -dir=/data -s3 -s3.port=8333 -volume.max=0
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+    ports:
+      - "127.0.0.1:8333:8333"   # S3 API
+      - "127.0.0.1:8888:8888"   # filer UI (browse files)
+      - "127.0.0.1:9333:9333"   # master UI
+    volumes:
+      - seaweedfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8333/healthz >/dev/null"]
+      interval: 5s
+      retries: 20
+
+  # One-shot job: creates the buckets once SeaweedFS is healthy, then exits.
+  seaweedfs-init:
+    image: chrislusf/seaweedfs:4.48
+    profiles: [core]
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for b in app-exports lakehouse; do
+          echo "s3.bucket.create -name $$b" | weed shell -master=seaweedfs:9333
+        done
+        echo "s3.bucket.list" | weed shell -master=seaweedfs:9333
+
+  # Kafka in KRaft mode (no ZooKeeper). Containers use kafka:19092; the Mac uses 127.0.0.1:9092.
+  kafka:
+    image: apache/kafka:3.9.2
+    profiles: [core]
+    hostname: kafka
+    environment:
+      CLUSTER_ID: RN8dnrXdR86lHrmMKXzTIA   # from kafka-storage.sh random-uuid; fixed so the volume stays valid
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:19092,PLAINTEXT_HOST://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://127.0.0.1:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"   # topics are created by kafka-init
+      KAFKA_LOG_DIRS: /var/lib/kafka/data        # the image default is /tmp, which a restart loses
+    ports:
+      - "127.0.0.1:9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 10s
+      retries: 12
+      start_period: 15s
+
+  # One-shot job: creates the topics once Kafka is healthy, then exits.
+  kafka-init:
+    image: apache/kafka:3.9.2
+    profiles: [core]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        T=/opt/kafka/bin/kafka-topics.sh
+        $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic parcel-scans --partitions 3 --replication-factor 1
+        $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic parcel-scans-replay --partitions 1 --replication-factor 1
+        $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic hub-delivery-5m --partitions 3 --replication-factor 1
+        $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic scans-late --partitions 1 --replication-factor 1
+        $$T --bootstrap-server kafka:19092 --list
+
+volumes:
+  postgres_data:
+  seaweedfs_data:
+  kafka_data:
