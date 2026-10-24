@@ -328,6 +328,59 @@ The run took 112 s.
 | per courier hour, on average | 18.73 km moved, 17.77 idle minutes, 25.93 km/h on trips |
 | late share in `fact_delivery` | 17.56%; mean delivery 120.9 min against 164.8 min promised |
 
+## DP2: load the warehouse (`jobs/dp2_warehouse.py`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_warehouse.py
+```
+
+The warehouse is the Postgres database `dwh`: gold's star schema, copied for BI tools and SQL
+users, with declared keys (`jobs/sql/dwh_schema.sql`).
+
+| Table | Rows | Key | Foreign keys |
+|---|---|---|---|
+| `dim_date` | every day of the period | `date_key` | |
+| `dim_hub` | every hub | `hub_id` | |
+| `dim_customer` | every customer | `customer_id` | `hub_id` → `dim_hub` |
+| `dim_courier` | every SCD2 version | `courier_sk` | `hub_id` → `dim_hub` |
+| `fact_delivery` | the last 90 days of the period | `order_id` | `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date` |
+| `obt_delivery` | the last 30 days, one wide row per order | `order_id` | none: a one-big-table carries its dimensions' attributes on the row |
+
+**How it loads.** Postgres refuses to `TRUNCATE` one table that another references, and a reader
+should never see a half-loaded warehouse. So the job loads in three steps:
+
+1. **Apply the DDL.** `CREATE TABLE IF NOT EXISTS`, with the keys.
+2. **Write staging.** Each table's rows go to `staging.<table>` with Spark JDBC.
+3. **Swap in one transaction.** It empties all six tables together, inserts dimensions before facts
+   (so Postgres checks every foreign key on every row), and drops `staging`. A failure rolls the
+   whole swap back.
+
+### Checks on the dev slice (2026-10-23)
+
+| Check | Result |
+|---|---|
+| backup before the first load | `pg_dump` of the empty `dwh` |
+| rows | `dim_date` 184, `dim_hub` 40, `dim_customer` 50,000, `dim_courier` 799, `fact_delivery` 408,000 (2024-09-02 to 2024-11-30), `obt_delivery` 168,000 (2024-11-01 to 2024-11-30) |
+| declared keys (`information_schema`) | 6 primary keys; 6 foreign keys: `fact_delivery` → `dim_courier`, `dim_customer`, `dim_date`, `dim_hub`; `dim_courier` → `dim_hub`; `dim_customer` → `dim_hub` |
+| `staging` after the load | dropped; only `public` remains |
+| time | 30 s; a reload gives the same counts (33 s) |
+
+The fact row counts can be checked by hand:
+
+- **Last 90 days:** 84 normal days × 4,000 orders plus the 6 Black Friday days × 12,000 = 408,000.
+- **Last 30 days:** 24 × 4,000 + 6 × 12,000 = 168,000.
+
+**DBeaver:** New connection, then PostgreSQL, with these settings:
+
+| Setting | Value |
+|---|---|
+| Host | `127.0.0.1` |
+| Port | `15432` |
+| Database | `dwh` |
+| User and password | from `.env` |
+
+The ER diagram of `public` then shows the six foreign keys.
+
 ### DP2 pitfalls
 
 - **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
