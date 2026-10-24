@@ -233,3 +233,56 @@ columns or fails ([data_characteristics.md](data_characteristics.md#schema-befor
 
 On the slice, 2024-09-07 (a rollout day) passed with both versions present
 ([pipelines.md](pipelines.md#checks-on-the-dev-slice-2024-09-07-a-v2-rollout-day)).
+
+## Duplicates: the 2% re-uploaded pings (`jobs/dedup_benchmark.py`)
+
+**The problem.** The app re-uploads whole 5-minute batches. The copies repeat `(courier_id,
+device_seq)` with a later `uploaded_ts`, in the same `export_date` folder. That is 95,819,124
+extra rows at full scale, 1.999% of the originals. Silver keeps the earliest upload of each key.
+
+**Two methods** keep the same rows. Both read whole rows, as silver does, and a checksum over the
+kept rows must agree:
+
+| Method | What it does |
+|---|---|
+| `window` | silver's way: `row_number()` over `(courier_id, device_seq)` ordered by `uploaded_ts`, which shuffles and sorts every column of every row |
+| `targeted` | one `export_date` at a time. It finds the duplicated keys from the two key columns only. Every other row passes through a broadcast anti-join, with no shuffle of the wide rows, and only the rows of the duplicated keys go through the window |
+
+```python
+# jobs/dedup_benchmark.py
+def targeted(day):
+    duplicated = day.groupBy(*KEY).count().where(F.col("count") > 1).select(*KEY)
+    keys = F.broadcast(duplicated)
+    return day.join(keys, KEY, "left_anti").unionByName(earliest_upload(day.join(keys, KEY, "left_semi")))
+```
+
+**Results (2026-10-24), on the first 7 full-scale export dates.** Each method is shown with its
+time and the shuffle and spill summed over its stages.
+
+| Method | Rows in | Rows kept | Removed | Wall time | Shuffle written | Spill, memory / disk |
+|---|---:|---:|---:|---:|---:|---:|
+| window | 166,023,384 | 162,768,960 | 3,254,424 (1.9994% of kept) | **73.3 s** | 2.12 GB | 7.58 / 2.06 GB |
+| targeted | 166,023,384 | 162,768,960 | 3,254,424 (1.9994% of kept) | 120.2 s | **1.28 GB** | 29.09 / 1.71 GB |
+
+- **The rows removed match the injection.** The generator re-uploads 2.00% of the rows, and
+  both methods remove 1.9994% of the rows they keep.
+- **The two methods agree.** They keep the same rows, with the same checksum
+  (−6,968,598,871,620,969,569).
+- **The targeted method writes 40% less shuffle**, as planned, because only the two key columns
+  and the 4% of rows with a duplicated key are shuffled.
+- **But it is 64% slower here.** Each day is read three times, for the key count, the anti-join
+  and the semi-join. The seven days also run one after another, and every day's job is too small
+  to keep the 4 cores busy.
+
+A ping has 10 to 12 narrow columns, so shuffling whole rows costs less than reading the files
+from SeaweedFS again.
+
+**The choice for the pipeline.** Silver keeps the window method
+(`jobs/dp2_silver.py`, `row_number()` over `(courier_id, device_seq)` by `uploaded_ts`). The
+targeted method would win for wide rows, where the shuffle grows with the row width while the key
+count does not. It would also win when a lookup of known duplicate keys is already available, and
+the pings have neither.
+
+The DP2 suite checks the result on every run: `(courier_id, device_seq)` is unique in
+`stg_courier_pings`. On the slice, 967,704 duplicates were removed, exactly the injected count
+([pipelines.md](pipelines.md#checks-on-the-dev-slice-2026-10-23-1)).
