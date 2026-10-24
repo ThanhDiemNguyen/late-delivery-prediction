@@ -8,4 +8,5 @@ Documents are added here as each part is built.
 
 | Document | Covers |
 |---|---|
+| [environment.md](environment.md) | The machine, every pinned image (arm64, size, idle memory), PyFlink on arm64, and the safe stop and unplug procedure |
 | [core_services.md](core_services.md) | Postgres, SeaweedFS and Kafka: what they hold, how to start them, verification, pitfalls |

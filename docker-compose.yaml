@@ -43,6 +43,8 @@ services:
       - "127.0.0.1:9333:9333"   # master UI
     volumes:
       - seaweedfs_data:/data
+    # A clean shutdown takes about 26 s; at the default 10 s, Docker kills it (exit 137).
+    stop_grace_period: 60s
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8333/healthz >/dev/null"]
       interval: 5s

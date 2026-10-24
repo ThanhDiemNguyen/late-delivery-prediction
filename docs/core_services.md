@@ -29,7 +29,8 @@ docker compose --profile core stop         # stop and keep the data
 ```
 
 `docker compose --profile core down -v` also deletes the volumes, and with them every database,
-bucket and topic.
+bucket and topic. Before unplugging the SSD, follow
+[Start, stop and unplug safely](environment.md#start-stop-and-unplug-safely).
 
 ## What gets created
 
@@ -102,5 +103,7 @@ Further checks:
   reference project mounted the volume without setting this.
 - **Fixed `CLUSTER_ID`.** KRaft stamps the cluster ID into the data folder. The ID is generated
   once with `kafka-storage.sh random-uuid` and kept in the compose file, so the volume stays valid.
+- **`stop_grace_period: 60s` for SeaweedFS.** A clean stop takes about 26 s, so Docker's default
+  10 s killed it (exit 137). Measurements are in [environment.md](environment.md#decisions-and-pitfalls).
 - **Topics are explicit.** `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`, so a typo in a topic name
   fails loudly instead of creating a new topic.

@@ -61,8 +61,10 @@ Start them with `cp .env.example .env` (then change the passwords) and
 
 ## Requirements
 
-- An Apple Silicon Mac. Every image runs as linux/arm64.
-- Docker Desktop with 16 GB memory, 8 CPUs, 2 GB swap and an 800 GB disk limit.
+- An Apple Silicon Mac. Every image runs as linux/arm64 ([image inventory](docs/environment.md#image-inventory)).
+- Docker Desktop with 16 GB memory, 8 CPUs, 2 GB swap and an 800 GB disk limit. Its disk image is
+  on an external SSD; stop the stack before unplugging it
+  ([procedure](docs/environment.md#start-stop-and-unplug-safely)).
 - [uv](https://docs.astral.sh/uv/) for Python tools. The linter runs with `uvx ruff check .`.
 
 ## Documentation
