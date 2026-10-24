@@ -10,14 +10,16 @@
 
 import os
 
-from pyspark.sql import SparkSession, functions as F
+from pyspark.sql import functions as F
+
+from common import lakehouse_session
 
 DAY = "2024-06-01"
 
 
 def main() -> None:
     """Run the three checks and print what each one found."""
-    spark = SparkSession.builder.appName("smoke_lakehouse").getOrCreate()
+    spark = lakehouse_session("smoke_lakehouse")
 
     pings = spark.read.parquet(f"s3a://app-exports/courier_pings/export_date={DAY}/")
     print(f"[s3a] pings on {DAY}: {pings.count():,} rows, columns {pings.columns}")

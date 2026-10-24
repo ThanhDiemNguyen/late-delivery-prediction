@@ -123,7 +123,12 @@ hub is Downtown LA (hub 1) with 70,548 pings. From the Mac, the Python Trino cli
 - **Config is mounted as folders.** `infra/spark/conf/` and `infra/trino/catalog/` are mounted as
   whole folders. A single-file bind mount follows the file's inode, so after `git checkout`
   replaced `spark-defaults.conf`, the running containers could no longer find it
-  (`FileNotFoundException`). With folder mounts, the containers see the new file.
+  (`FileNotFoundException`). With folder mounts, the containers see a replaced file. They still
+  lose the folder if git deletes and recreates it (switching to a branch that does not have it),
+  and then a job runs without its settings. Its S3A requests then go to Amazon's public endpoint,
+  which rejects them with `InvalidAccessKeyId`. Every job therefore starts through
+  `jobs/common.py`, which stops with a clear message when the settings are missing. The fix is to
+  recreate the Spark containers.
   The Trino catalog folder replaces the image's demo catalogs (`tpch`, `jmx` and the others), and
   only `delta` is needed.
 - **The metastore image wants empty cloud variables.** Its start script stops unless 14
