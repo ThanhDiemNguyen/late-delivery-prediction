@@ -16,8 +16,8 @@ The `core` Compose profile starts the three services that every later part depen
 | `kafka` | `apache/kafka:3.9.2` | Single broker in KRaft mode (no ZooKeeper) | `127.0.0.1:9092` | `kafka_data` |
 | `kafka-init` | same image | One-shot job: creates the topics, then exits | — | — |
 
-Every port binds to `127.0.0.1`, so the services are reachable only from this Mac. The volumes live
-inside Docker Desktop's disk image, which is on the T9 SSD.
+Every port binds to `127.0.0.1`, so only this Mac can reach the services. The volumes live inside
+Docker Desktop's disk image, which is on the T9 SSD.
 
 ## Start and stop
 
@@ -28,8 +28,8 @@ docker compose --profile core ps -a        # postgres, seaweedfs, kafka healthy;
 docker compose --profile core stop         # stop and keep the data
 ```
 
-`docker compose --profile core down -v` also deletes the volumes, and with them every database,
-bucket and topic. Before unplugging the SSD, follow
+The command `docker compose --profile core down -v` also deletes the volumes, and with them every
+database, bucket and topic. Before you unplug the SSD, follow
 [Start, stop and unplug safely](environment.md#start-stop-and-unplug-safely).
 
 ## What gets created
@@ -44,8 +44,8 @@ bucket and topic. Before unplugging the SSD, follow
 | `metastore` | the Hive Metastore catalog of lakehouse tables |
 | `datahub` | DataHub's metadata |
 
-Postgres also creates `postgres` and a database named after `POSTGRES_USER` (`platform`) by
-default. The init script runs only on the first start of an empty volume.
+By default, Postgres also creates `postgres` and a database named after `POSTGRES_USER`
+(`platform`). The init script runs only on the first start of an empty volume.
 
 **SeaweedFS buckets:**
 
@@ -90,25 +90,25 @@ Further checks:
 
 ## Decisions and pitfalls
 
-- **Port 15432 for Postgres.** A Postgres already running on the Mac uses 5432, so the container
-  publishes 15432. Containers still reach it as `postgres:5432`.
+- **Port 15432 for Postgres.** A Postgres server that already runs on the Mac uses 5432, so the
+  container publishes 15432. Containers still reach it as `postgres:5432`.
 - **No credentials file for SeaweedFS.** SeaweedFS 4.48 creates its admin S3 identity from
   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, which Compose fills from `.env`. Anonymous
   requests and wrong keys get HTTP 403. The public repo holds no keys.
-- **`-volume.max=0`.** By default SeaweedFS stops at 8 volumes of 30 GB, which is 240 GB. That is
-  less than the exports plus the bronze, silver and gold copies. With `0`, it sizes the limit from
-  the free disk.
-- **`KAFKA_LOG_DIRS=/var/lib/kafka/data`.** The image writes to `/tmp/kraft-combined-logs` by
-  default. That folder is not on the volume, so a container rebuild would lose every topic. The
-  reference project mounted the volume without setting this.
+- **`-volume.max=0`.** By default, SeaweedFS stops at 8 volumes of 30 GB, which is 240 GB. That is
+  less than the exports plus the bronze, silver and gold copies. With `0`, SeaweedFS sizes the
+  limit from the free disk.
+- **`KAFKA_LOG_DIRS=/var/lib/kafka/data`.** By default, the image writes to
+  `/tmp/kraft-combined-logs`. That folder is not on the volume, so a container rebuild would lose
+  every topic. The reference project mounted the volume without this setting.
 - **Fixed `CLUSTER_ID`.** KRaft stamps the cluster ID into the data folder. The ID is generated
   once with `kafka-storage.sh random-uuid` and kept in the compose file, so the volume stays valid.
 - **`stop_grace_period: 60s` for SeaweedFS.** A clean stop takes about 26 s, so Docker's default
-  10 s killed it (exit 137). Measurements are in [environment.md](environment.md#decisions-and-pitfalls).
-- **Topics are explicit.** `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`, so a typo in a topic name
-  fails loudly instead of creating a new topic.
+  10 s killed it (exit 137). The measurements are in [environment.md](environment.md#decisions-and-pitfalls).
+- **Topics are explicit.** The setting `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false` makes a typo in a
+  topic name fail loudly instead of creating a new topic.
 - **No time-based retention on the four stream topics.** Their records carry the 2024 event time
-  as the record timestamp, and the 7-day default deletes a segment whose timestamps are older, a
-  few minutes after it is written. `kafka-init` sets `retention.ms=-1` on them (an alter, so it is
-  safe to rerun). The producer and the Flink runs empty them before each run
-  ([streaming.md](streaming.md)).
+  as the record timestamp. The 7-day default deletes a segment whose timestamps are older than
+  that, a few minutes after the segment is written. The `kafka-init` job sets `retention.ms=-1` on
+  these topics (an alter, so it is safe to rerun). The producer and the Flink runs empty the topics
+  before each run ([streaming.md](streaming.md)).

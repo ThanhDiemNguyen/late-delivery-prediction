@@ -1,13 +1,13 @@
 # Streaming: live parcel-scan events in Kafka
 
-The handhelds at the hubs and in the vans send every parcel scan to Kafka as it happens. The stream
-has two problems on purpose:
+The handhelds at the hubs and in the vans send every parcel scan to Kafka when it happens. The
+stream has two problems on purpose:
 
 - **late arrivals:** weak signal holds some scans back for minutes;
 - **duplicates:** a handheld that gets no acknowledgement sends the same scan again.
 
-Flink counts the scans in 5-minute windows per hub. Each run is checked window by window against
-the truth recomputed from the export Parquet.
+Flink counts the scans in 5-minute windows per hub. A check then compares each run, window by
+window, with the truth recomputed from the export Parquet.
 
 | Mode | What the job does | Earns |
 |---|---|---|
@@ -17,7 +17,7 @@ the truth recomputed from the export Parquet.
 
 ## Topics
 
-The topics are created by `kafka-init` ([core_services.md](core_services.md)).
+`kafka-init` creates the topics ([core_services.md](core_services.md)).
 
 | Topic | Partitions | Written by | Holds |
 |---|---:|---|---|
@@ -26,14 +26,14 @@ The topics are created by `kafka-init` ([core_services.md](core_services.md)).
 | `hub-delivery-5m` | 3 | Flink | delivered and late-delivered scans per hub and 5-minute window |
 | `scans-late` | 1 | Flink | the side output: scans that arrived after their window closed |
 
-**Why a 1-partition replay topic.** A Flink source's watermark is the minimum over its
-partitions, so a partition that lags or sits idle holds every window open. With one partition,
+**Why a 1-partition replay topic.** The watermark of a Flink source is the minimum over its
+partitions. Thus a partition that lags or sits idle holds every window open. With one partition,
 the watermark follows the arrival order exactly, and a run is repeatable.
 
 ## The event
 
-One JSON record per scan send. The key is `order_id`. The **Kafka record timestamp is
-`scan_ts`**, the event time (`CreateTime`), so Flink can take event time from the record.
+Each scan send is one JSON record, with the key `order_id`. The Kafka record timestamp is
+`scan_ts`, the event time (`CreateTime`), so Flink can take event time from the record.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -54,31 +54,34 @@ uv run python -m generator.check_stream  --start 2024-11-04 --days 7 --topic par
 ```
 
 1. **Read the scans** of export dates `--start` to `--start + days - 1` from
-   `s3://app-exports/parcel_scans/` (each date must have its `_SUCCESS` marker). The same Parquet
+   `s3://app-exports/parcel_scans/`. Each date must have its `_SUCCESS` marker. The same Parquet
    files are the truth that the Flink windows are checked against.
-2. **Read each order's `promised_ts` and drop `area`** from `oms.orders` (the area trimmed).
-3. **Delay every scan.** A scan is sent 0 to 3 s after it happens. Exactly 8% of the scans arrive
-   2 to 20 minutes late instead (uniform). The late ones are chosen per area:
+2. **Read each order's `promised_ts` and the `area` of its drop** from `oms.orders`, with the
+   area trimmed.
+3. **Delay every scan.** An on-time scan is sent 0 to 3 s after it happens. Exactly 8% of the
+   scans arrive 2 to 20 minutes late instead, with the delay uniform over that range. The
+   producer chooses the late scans per area:
    - 25% of the scans of Semi-Urban and Other drops, where the signal is weak;
    - in Metropolitan and Urban, the share that makes 8% overall (6.1% for the default week).
-4. **Retry 1.50% of the scans.** Each is sent a second time, 1 to 10 s after its first send,
-   with the same payload.
+4. **Retry 1.50% of the scans.** Each of these scans is sent a second time, 1 to 10 s after its
+   first send, with the same payload.
 5. **Send in arrival order** (`sent_ts`), keyed by `order_id`, with `timestamp=scan_ts`. The
-   producer is idempotent (`enable.idempotence`), so Kafka's own retries add no duplicates. Only
-   the 1.50% are duplicates.
+   producer is idempotent (`enable.idempotence`), so Kafka's own retries add no duplicates. The
+   only duplicates are the retries of those 1.50%.
 
-The counts are exact (`round(share × scans)` rows drawn without replacement), and one seed fixes
-every choice, so a rerun sends the same events.
+The counts are exact: the producer draws `round(share × scans)` rows without replacement. One
+seed fixes every choice, so a rerun sends the same events.
 
-- **Replacing the events.** Before sending, the producer empties the topic: `delete_records` up
-  to the end offsets, which keep counting. `--keep` appends instead.
+- **Replacing the events.** Before it sends, the producer empties the topic with
+  `delete_records` up to the end offsets. The offsets keep counting from there. With `--keep`,
+  the producer appends instead.
 - **Pacing.** `--rate N` limits the send to N events per second. Without it, the week goes out
   in under a second. Event time comes from the records, so the send speed does not change any
   window.
 
 The default slice is the week of 2024-11-04 to 2024-11-10. It is outside both peak weeks, so its
-volume is ordinary: 83,460 scans, from the 28,000 orders of that week plus the ones that span its
-midnights. 9.9% of the week's orders drop in Semi-Urban or Other.
+volume is ordinary. It has 83,460 scans, from the 28,000 orders of that week plus the orders that
+span its midnights. 9.9% of the week's orders drop in Semi-Urban or Other.
 
 ## Measured (2026-10-24)
 
@@ -105,17 +108,19 @@ It passed 11 of 11 on `parcel-scans-replay`, and again on `parcel-scans` (3 part
   08:00 UTC (00:00 in LA) to 2024-11-11 07:59 UTC.
 - **Late share by area:** Metropolitan 6.00%, Urban 6.34%, Semi-Urban 25.14%, Other 24.70%.
 - **Late delays, in minutes:** 1,086 scans at 2 to 5, 1,894 at 5 to 10, 1,851 at 10 to 15, and
-  1,846 at 15 to 20. That is uniform; the first bucket is 3 minutes wide.
+  1,846 at 15 to 20. The spread is uniform: the first bucket holds fewer scans because it is
+  3 minutes wide.
 - **On-time delay:** median 1.5 s, p99 2.97 s, maximum 3.00 s. **Retry gap:** 1.01 to 9.99 s.
 - **Out of order:** 14.16% of the records arrive behind the newest event time already seen.
   7.99% arrive more than 10 s behind it, which is the bound of the Flink baseline's watermark.
-  On `parcel-scans`, with the order taken within each of its 3 partitions, they are 10.29% and
-  7.97%.
-- **Speed:** 84,712 events in 0.6 s as fast as possible, and 16.9 s at `--rate 5000`.
+  On `parcel-scans`, where the order is taken within each of its 3 partitions, the two shares
+  are 10.29% and 7.97%.
+- **Speed:** 84,712 events take 0.6 s at full speed and 16.9 s at `--rate 5000`.
 
-`tests/test_scan_producer.py` checks the same rules on synthetic scans, without Kafka: the exact
-shares, the delay ranges, the retries, arrival order, the same events from the same seed, and a
-missing order refused. It also checks that every `check_stream` check passes on the built events.
+`tests/test_scan_producer.py` checks the same rules on synthetic scans, without Kafka. It covers
+the exact shares, the delay ranges, the retries and the arrival order. It also checks that the
+same seed gives the same events, and that the producer refuses a missing order. Last, it checks
+that every `check_stream` check passes on the built events.
 
 ## Flink: the session cluster (profile `stream`)
 
@@ -131,13 +136,14 @@ docker compose --profile core --profile stream up -d --wait
 The idle memory was measured on the first image, `lastleg/flink:1.20.5-naive`, which also ran the
 slice-week results below.
 
-The image adds these to `flink:1.20.5-scala_2.12-java17`. The first build
-(`infra/flink/Dockerfile.naive`) was 2.06 GB; the services now run the multi-stage
-`infra/flink/Dockerfile` at 1.68 GB ([environment.md](environment.md#built-images-naive-against-multi-stage)):
+The first image (`infra/flink/Dockerfile.naive`) was 2.06 GB. The services now run the
+multi-stage `infra/flink/Dockerfile` at 1.68 GB
+([environment.md](environment.md#built-images-naive-against-multi-stage)). The image that the
+services run adds these to `flink:1.20.5-scala_2.12-java17`:
 
 - Python 3.10.12 and PyFlink 1.20.5, compiled from source because PyPI has no arm64 wheel
   ([environment.md](environment.md#pyflink-on-arm64)). The compilers are only in the first stage,
-  which builds the wheels; the image the services run keeps none.
+  which builds the wheels. The image that the services run has no compilers.
 - `libpython3.10`, which thread mode needs.
 - `flink-sql-connector-kafka` 3.4.0-1.20.
 - A copy of `flink-python` in `lib/` (see Pitfalls).
@@ -167,38 +173,43 @@ late_scans.sink_to(kafka_sink(LATE))                                            
 ```
 
 1. **The watermark trails the newest event time seen by 10 s.** A watermark W tells every operator
-   that no scan older than W is expected any more. Flink emits it every millisecond
-   (`set_auto_watermark_interval(1)`). No timestamp assigner is set: the Kafka source gives each
-   record its record timestamp, which the producer set to `scan_ts`.
+   to expect no more scans older than W. Flink emits it every millisecond
+   (`set_auto_watermark_interval(1)`). The job sets no timestamp assigner. The Kafka source gives
+   each record its record timestamp, which the producer set to `scan_ts`.
 2. **The source** reads `parcel-scans-replay` from its first offset up to `--stop-offset`, and
-   then ends. `parse` turns each JSON record into a tuple. Python runs in thread mode, inside the
-   TaskManager's JVM.
-   - **2b. Dedup** (`dedup` mode only). The stream is keyed by `scan_id`, so all sends of one scan
-     reach the same `FirstSend` state. `FirstSend` keeps one flag per `scan_id` in keyed state: the
-     first send sets it and passes on, and a retry finds it set and is dropped. The flag expires
-     15 minutes after it was written (`StateTtlConfig`), so on a live stream the state holds only
-     the last 15 minutes of scan ids instead of growing for ever. A retry trails its first send
-     by 10 s at most, so it always finds the flag.
+   then ends. The `parse` function turns each JSON record into a tuple. Python runs in thread
+   mode, inside the TaskManager's JVM.
+   - **2b. Dedup** (`dedup` mode only). The stream is keyed by `scan_id`, so all sends of one
+     scan reach the same `FirstSend` state. `FirstSend` keeps one flag per `scan_id` in keyed
+     state. The first send sets the flag and passes on. A retry finds the flag set and is
+     removed.
+
+     The flag expires 15 minutes after it was written (`StateTtlConfig`). On a live stream, the
+     state thus holds only the last 15 minutes of scan ids and does not grow for ever. A retry
+     trails its first send by 10 s at most, so it always finds the flag.
 3. **`key_by` the hub:** each hub has its own windows.
 4. **Tumbling event-time windows of 5 minutes:** a scan goes to the window `[k × 5 min,
    (k + 1) × 5 min)` that holds its `scan_ts`. Windows start on the epoch's 5-minute marks, which
    are also :00, :05, ... in Los Angeles.
-5. **Allowed lateness, then the side output.** After a window fires, `allowed_lateness` keeps
-   its scans for that long past the watermark: 0 in `baseline`, 20 minutes in `lateness`. A scan
-   that arrives in that time is added, and the window fires again with the updated counts. A scan
-   that arrives later than that goes to the side output instead of silently away. That is when
-   the window's last millisecond, plus the allowed lateness, is at or behind the watermark.
+5. **Allowed lateness, then the side output.** After a window fires, `allowed_lateness` sets how
+   long past the watermark the window keeps its scans: 0 in `baseline`, 20 minutes in `lateness`.
+   If a scan arrives in that time, Flink adds it, and the window fires again with the updated
+   counts. A scan is too late when the window's last millisecond, plus the allowed lateness, is at
+   or behind the watermark. Such a scan goes to the side output, so Flink does not discard it
+   silently.
 6. **`CountScans` runs when the watermark passes the window's end.** It gets every scan of the
    window and counts three things: the scans, the `delivered` scans, and the `delivered` scans
-   after `promised_ts`. Each firing is one JSON record, with the watermark at that moment.
+   after `promised_ts`. Each firing gives one JSON record, which also holds the watermark at that
+   moment.
 7. **Two at-least-once Kafka sinks:** the windows go to `hub-delivery-5m`, the late scans to
    `scans-late`.
-8. **The late scans are a task of their own** (`disable_chaining()`). Chained to the window, they
-   were invisible in the Flink UI, which counts records only between tasks. As their own task,
-   the UI shows how many scans missed their window. This changes no result, only what the UI can
-   count; the slice-week results below ran before the change.
+8. **The late scans are a task of their own** (`disable_chaining()`). The Flink UI counts records
+   only between tasks, so the late scans were invisible while they were chained to the window.
+   With the late scans as a separate task, the UI shows how many scans missed their window. This
+   change does not affect the results, only what the UI can count. The slice-week results below
+   ran before the change.
 
-One window, and one late scan that missed a window:
+The first record below is one window. The second is a late scan that missed a window:
 
 ```json
 {"mode": "baseline", "hub_id": 39, "window_start": 1730707200000, "window_end": 1730707500000,
@@ -208,8 +219,8 @@ One window, and one late scan that missed a window:
 ```
 
 The window is 2024-11-04 08:00 to 08:05 UTC, which is midnight in LA. The late scan happened at
-08:00:41 and was sent at 08:12:38, almost 12 minutes later. By then the watermark had passed
-08:05, so its window had already fired.
+08:00:41 and was sent at 08:12:38, almost 12 minutes later. By then the watermark was past 08:05,
+so the window fired before the scan arrived.
 
 ## How a run works (`generator/stream_windows.py`)
 
@@ -219,20 +230,20 @@ uv run python -m generator.stream_windows --mode baseline
 
 1. Build the week's events exactly as `scan_producer` does: the same seed gives the same events.
 2. Empty `parcel-scans-replay`, `hub-delivery-5m` and `scans-late`.
-3. Submit the job, bounded at the offset after the last event, and wait until its tasks run.
+3. Submit the job, bounded at the offset after the last event. Wait until its tasks run.
 4. **Send the events at 1,000 per second while the job reads them.**
-5. Wait until the job finishes. At the stop offset the source ends, and the final watermark fires
-   every window still open.
-6. Rebuild the windows from the export Parquet, which is the truth, and compare them with the last
+5. Wait until the job finishes. When the source reaches the stop offset, it ends, and the final
+   watermark fires every window that is still open.
+6. Rebuild the windows from the export Parquet, which is the truth. Compare them with the last
    firing of each output window.
 
 **Why the replay is paced.** The week has 84,712 events over 7 days of event time: one every 7.1 s.
-At 1,000 events/s, the 1 ms watermark interval is about one event, about 7 s of event time. That
-is under the 10 s bound, so the watermark moves the way it would on a live stream.
+At 1,000 events/s, one 1 ms watermark interval covers about one event, which is about 7 s of
+event time. That is under the 10 s bound, so the watermark moves as it would on a live stream.
 
-A topic that is already full is read in about a second. The watermark would then jump hours of
-event time between two emissions, so most late scans would still find their window open. That
-would hide the very problem the baseline is meant to show.
+Flink reads a topic that is already full in about a second. The watermark would then jump hours
+of event time between two emissions, so most late scans would still find their window open. That
+would hide the problem that the baseline is meant to show.
 
 **What is compared.**
 
@@ -242,12 +253,12 @@ would hide the very problem the baseline is meant to show.
   over-counted. A truth window with no output counts as under-counted.
 - **Conservation:** the scans in the windows plus the scans in `scans-late` must equal the records
   read. Every record either lands in a window or reaches the side output.
-- **Simulated drops:** the drops a watermark updated after every record would cause, computed from
-  the arrival order.
+- **Simulated drops:** the scans that a watermark updated after every record would drop. The
+  simulation computes them from the arrival order.
 
 ## Baseline results (2026-10-24)
 
-Four runs of `--mode baseline`. Each job ran about 85 s, and conservation held in every run
+Four runs used `--mode baseline`. Each job ran about 85 s, and conservation held in every run
 (84,712 = scans in windows + dropped).
 
 | Run | Windows exact (of 32,124) | Over-counted | Under-counted (missing) | Dropped (Flink) | Dropped (simulated) |
@@ -259,7 +270,7 @@ Four runs of `--mode baseline`. Each job ran about 85 s, and conservation held i
 
 Runs 3 and 4 sent with `linger.ms=0` instead of 20. Producer batching made no difference.
 
-Run 1 in totals:
+The totals of run 1:
 
 | | Scans | Delivered | Late-delivered |
 |---|---:|---:|---:|
@@ -271,14 +282,16 @@ The Flink total is 84,712 records read − 5,546 dropped = 79,166 scans in the w
 **What the baseline shows:**
 
 - **Late arrivals are lost to the windows.** Every dropped scan arrived at least 123 s after it
-  happened: in run 4, 1,948 `at_hub`, 1,894 `picked_up` and 1,746 `delivered` scans. Run 1 has
-  1,182 windows missing entirely: windows whose scans all came late.
+  happened. In run 4, the dropped scans were 1,948 `at_hub`, 1,894 `picked_up` and 1,746
+  `delivered` scans. Run 1 has 1,182 windows missing entirely: these are windows whose scans all
+  came late.
 - **Retries are counted twice.** The retries of on-time scans over-count 911 windows. A retry of
-  a scan that came late is dropped with it: it arrives 1 to 10 s after the first send, and by then
-  the watermark has not moved back.
-- **Flink drops 11% to 12% fewer than the simulation,** and the count varies by up to 1.7%
-  between runs. The source emits the watermark on a 1 ms timer, not after every record. So a late scan
-  close to its window's end can still find the window open, depending on when the timer fired.
+  a late scan is dropped with it. The retry arrives 1 to 10 s after the first send, and the
+  watermark does not move back in that time.
+- **Flink drops 11% to 12% fewer than the simulation.** The count also varies by up to 1.7%
+  between runs. The source emits the watermark on a 1 ms timer instead of after every record.
+  Thus a late scan near its window's end can still find the window open, depending on when the
+  timer fired.
 
 ## Lateness results (2026-10-24)
 
@@ -295,15 +308,15 @@ The Flink total is 84,712 records read − 5,546 dropped = 79,166 scans in the w
 | job runtime | 85.1 s | 88.0 s |
 
 - **20 minutes is enough by construction.** A scan arrives at most 20 minutes after it happens.
-  The newest event time seen at that moment is no later than the arrival, so the watermark is at
+  The newest event time seen at that moment is no later than the arrival. So the watermark is at
   least 10 s short of the scan's time plus 20 minutes. The scan's window, plus 20 minutes, is
-  therefore still open. The simulation agrees: 0 drops.
-- **Late firings.** 4,401 firings come after a window's first one. Each is a late scan that
+  thus still open. The simulation agrees: 0 drops.
+- **Late firings.** 4,401 firings come after a window's first one, each from a late scan that
   found its window already fired. A window whose scans all came late fires for the first time on
-  its first late scan, so that firing is not an extra one: the baseline's 5,546 drops minus its
-  1,182 missing windows is 4,364, close to 4,401. The check takes each window's last firing. A consumer of
-  `hub-delivery-5m` must also treat a later record for the same hub and window as a replacement,
-  not an addition.
+  its first late scan, so that firing is not an extra one. The baseline's 5,546 drops minus its
+  1,182 missing windows is 4,364, near 4,401. The check takes each window's last firing. A
+  consumer of `hub-delivery-5m` must also treat a later record for the same hub and window as a
+  replacement, not an addition.
 - **What lateness costs.** Every window's state lives 20 minutes longer, and every late scan
   causes another output record.
 - **Retries are still counted twice.** The 1,252 retries over-count 1,195 windows (some windows
@@ -312,7 +325,7 @@ The Flink total is 84,712 records read − 5,546 dropped = 79,166 scans in the w
 ## Dedup results (2026-10-24)
 
 `--mode dedup` passed its three checks: 100.00% of the windows exact, 0 scans dropped, and 83,460
-scans in the windows, which equals the distinct scans read.
+scans in the windows. That count equals the distinct scans read.
 
 | | Baseline (run 1) | Lateness | Dedup |
 |---|---:|---:|---:|
@@ -326,8 +339,8 @@ scans in the windows, which equals the distinct scans read.
 | late-delivered | 4,525 | 4,825 | 4,738 |
 | job runtime | 85.1 s | 88.0 s | 88.0 s |
 
-The truth is 83,460 scans, 27,577 delivered and 4,738 late-delivered, so the dedup run equals it
-in every window.
+The truth is 83,460 scans, 27,577 delivered and 4,738 late-delivered. The dedup run equals it in
+every window.
 
 The record counts per task in Flink's REST API (`/jobs/<id>`) show where the retries go:
 
@@ -341,15 +354,15 @@ The record counts per task in Flink's REST API (`/jobs/<id>`) show where the ret
 
 **State TTL is processing time.** Flink counts a flag's 15 minutes in wall-clock time. In a paced
 replay, the whole week takes 85 s, so no flag expires during a run. On a live stream, wall-clock
-time and event time move together. The TTL then bounds the state to about 15 minutes of scans,
-against a retry gap of 10 s at most.
+time and event time move together. The TTL then limits the state to about 15 minutes of scans,
+while a retry gap is 10 s at most.
 
 ## Flink UI proof (2026-10-24): one full-scale day
 
 The slice-week runs above ran before the late scans were their own task, so their Flink UI could
 not show the drops. After that change (step 8), the three modes ran again on the multi-stage
 image, `lastleg/flink:1.20.5`. By then `app-exports` and `oms` held the full-scale generation, so
-the runs replay one full-scale day: the scans of export date 2024-11-04.
+the runs replayed one full-scale day: the scans of export date 2024-11-04.
 
 ```bash
 uv run python -m generator.stream_windows --mode baseline --start 2024-11-04 --days 1 --rate 20000
@@ -357,9 +370,9 @@ uv run python -m generator.stream_windows --mode baseline --start 2024-11-04 --d
 
 **The pacing rule still holds.** The day has 1,166,051 records over 86,400 s of event time,
 about 13.5 per event-second. At 20,000 records per second, one 1 ms watermark interval covers
-about 1.5 s of event time, well under the 10 s bound. The baseline job kept up with the sending
-(61.6 s for 58.3 s). The dedup job read more slowly (183.3 s), so each interval covered even less
-event time. The records are 1,148,819 scans and 17,232 retries (1.50%).
+about 1.5 s of event time, well under the 10 s bound. The baseline job kept up with the send: it
+ran 61.6 s, and the send took 58.3 s. The dedup job read more slowly (183.3 s), so each interval
+covered even less event time. The records are 1,148,819 scans and 17,232 retries (1.50%).
 
 | | Baseline | Lateness | Dedup |
 |---|---:|---:|---:|
@@ -371,55 +384,56 @@ event time. The records are 1,148,819 scans and 17,232 retries (1.50%).
 | firings | 9,262 | 96,414 | 95,134 |
 | job runtime | 61.6 s | 76.6 s | 183.3 s |
 
-A full-scale window holds about 124 scans, against about 3 on the slice. Most windows therefore
-hold at least one late scan or one retry, which is why fewer windows are exact than on the slice.
-The three fixes give the same verdict: allowed lateness removes every drop, and the keyed dedup
-then makes every window exact. The baseline's 87,137 drops are within 0.14% of the simulated
-87,261, because at this rate the watermark moves almost record by record.
+A full-scale window holds about 124 scans, against about 3 on the slice. Most windows thus hold at
+least one late scan or one retry, so fewer windows are exact than on the slice. The verdict is the
+same as on the slice: allowed lateness removes every drop, and the keyed dedup then makes every
+window exact. The baseline's 87,137 drops are within 0.14% of the simulated 87,261, because at
+this rate the watermark moves almost record by record.
 
 **What the Flink UI shows.** The job graph's table counts the records between tasks. The
-`Records Sent` of the window task is the number of scans it sent to the side output, and the
+`Records Sent` of the window task is the number of scans that it sent to the side output. The
 `Records Received` of `late scans` is the same number.
 
-The completed jobs. The two cancelled baseline jobs are the first attempts, which replayed a
-whole full-scale week at 1,000 records per second, about 2 hours a run; they were stopped:
+The screenshot below shows the completed jobs. The two cancelled baseline jobs are the first
+attempts. They replayed a whole full-scale week at 1,000 records per second, about 2 hours a run,
+and were stopped:
 
 ![Flink completed jobs: baseline, lateness and dedup finished on one full-scale day; two cancelled full-week baseline attempts](images/streaming/flink-completed-jobs.png)
 
-**Baseline.** The window task receives all 1,166,051 records and sends 87,137 to `late scans`:
-every one of them arrived after the watermark had passed its window's end.
+**Baseline.** The window task receives all 1,166,051 records and sends 87,137 to `late scans`.
+Each of these scans arrived after the watermark passed its window's end.
 
 ![Baseline job graph: the window task sends 87,137 records to late scans](images/streaming/flink-job-baseline.png)
 
-**Allowed lateness.** The same graph, with 20 minutes of allowed lateness. The window task sends
-0 records to `late scans`: every late scan found its window still open.
+**Allowed lateness.** This is the same graph, with 20 minutes of allowed lateness. The window task
+sends 0 records to `late scans`, because every late scan found its window still open.
 
 ![Lateness job graph: the window task sends 0 records to late scans](images/streaming/flink-job-lateness.png)
 
-**Dedup.** The `KEYED PROCESS` task (`FirstSend`) receives 1,166,051 records and sends 1,148,819:
-it removed exactly the 17,232 retries. The window task then sends 0 records to `late scans`.
+**Dedup.** The `KEYED PROCESS` task (`FirstSend`) receives 1,166,051 records and sends 1,148,819.
+It removes exactly the 17,232 retries. The window task then sends 0 records to `late scans`.
 
 ![Dedup job graph: KEYED PROCESS turns 1,166,051 records into 1,148,819, and no scan reaches late scans](images/streaming/flink-job-dedup.png)
 
 ## Pitfalls
 
-- **The slice must exist in the exports.** The producer stops if a date lacks `_SUCCESS`. After
+- **The slice must exist in the exports.** If a date lacks `_SUCCESS`, the producer stops. After
   the full-scale generation, the same command sends 100 times as many events (about 1.2 million a
   day).
-- **Without emptying, the topic holds every replay,** and a reader from the earliest offset would
-  count each scan once per replay. That is why the producer empties the topic by default.
-- **Kafka deleted the scans minutes after they were written.** The first Flink job read 0
-  records: the topic's log start offset equalled its end. Time-based retention judges a segment
-  by its record timestamps, and the 2024 event times are older than the 7-day default.
+- **Without emptying, the topic holds every replay.** A reader from the earliest offset would then
+  count each scan once per replay. For this reason, the producer empties the topic by default.
+- **Kafka deleted the scans minutes after they were written.** The first Flink job read 0 records,
+  because the topic's log start offset equalled its end. Time-based retention judges a segment by
+  its record timestamps. The 2024 event times are older than the 7-day default. To prevent this,
   `kafka-init` now sets `retention.ms=-1` on the four stream topics
   ([core_services.md](core_services.md)).
-- **The second thread-mode job on a TaskManager failed** with `NoSuchFieldException:
+- **The second thread-mode job on a TaskManager failed.** The error was `NoSuchFieldException:
   loadedLibraryNames`. Each job loaded pemja's native library through its own classloader. A
   fresh TaskManager ran one job and then failed on the next. The image now copies `flink-python`
   into `lib/`, and `classloader.parent-first-patterns.additional: pemja.` loads it once per JVM.
   After that, three jobs in a row ran.
-- **`cannot pickle '_thread.RLock' object` at submit.** PyFlink pickles the late-data
-  `OutputTag` with its type, and clears only the top-level Java handle. A type object already
-  used by `map(...)` keeps the Java handles of its fields. `scan_type()` therefore builds a new
-  type for each use.
+- **`cannot pickle '_thread.RLock' object` at submit.** PyFlink pickles the late-data `OutputTag`
+  with its type, and clears only the top-level Java handle. A type object already used by
+  `map(...)` keeps the Java handles of its fields. Thus `scan_type()` builds a new type for each
+  use.
 - **A replay read at full speed hides late arrivals.** See "Why the replay is paced" above.

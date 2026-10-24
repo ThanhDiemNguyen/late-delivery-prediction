@@ -8,7 +8,7 @@ Data moves through five zones. Each zone below has:
 The four platform zones (bronze, silver, gold and dwh) also have a relationship diagram drawn
 from the live catalog. The source has none.
 
-Columns and their rules are in [pipelines.md](pipelines.md).
+The columns and their rules are in [pipelines.md](pipelines.md).
 
 ```text
 oms (Postgres) + app-exports (SeaweedFS)  ->  bronze raw_*  ->  silver stg_*  ->  gold dim_/fact_/feat_  ->  dwh dim_/fact_/obt_ (Postgres)
@@ -16,15 +16,16 @@ oms (Postgres) + app-exports (SeaweedFS)  ->  bronze raw_*  ->  silver stg_*  ->
 ```
 
 **How the diagrams are made.** `scripts/schema_catalog.py --er-diagrams` reads the columns from
-Trino (catalog `delta`) and from Postgres (`dwh`), and renders one Graphviz diagram per platform
-zone into `docs/images/schema/`. Each table shows its key columns, and the count of the others.
+Trino (catalog `delta`) and from Postgres (`dwh`). It then renders one Graphviz diagram per
+platform zone into `docs/images/schema/`. Each table shows its key columns and the count of the
+other columns.
 
-- **`dwh`:** the edges are the declared foreign keys, and primary keys are in bold.
-- **Delta tables** declare no keys, so the edges are the logical model in the script. Before
-  drawing, the script checks every edge against the live columns. That check caught a wrong
+- In `dwh`, the edges are the declared foreign keys, and the primary keys are in bold.
+- The Delta tables declare no keys, so the edges are the logical model in the script. Before it
+  draws, the script checks every edge against the live columns. That check found an error in the
   first model: silver has no courier table.
-- **A dashed edge** joins on a natural key that matches several rows: `courier_id` against the
-  versions in `dim_courier`, or against the change history in `stg_courier_changes`.
+- A dashed edge joins on a natural key that matches several rows. This is `courier_id` against
+  the versions in `dim_courier`, or against the change history in `stg_courier_changes`.
 
 ## Naming convention
 
@@ -36,18 +37,18 @@ zone into `docs/images/schema/`. Each table shows its key columns, and the count
 | dwh | `dim_`, `fact_`, `obt_` | 7 |
 
 `scripts/schema_catalog.py --check-naming` lists every table of the four zones, with PASS, FAIL or
-EXCEPTION. It exits 1 on any name that breaks the convention. Result on 2026-10-24:
+EXCEPTION. It exits 1 on any name that breaks the convention. The result on 2026-10-24:
 
 ```text
 30 of 31 tables follow the convention, 1 documented exception, 0 violations
 ```
 
-The exception is `gold.dp3_progress`, the bookkeeping of the incremental DP3 run. It holds the
-fact versions the last run processed ([novel_cdf_incremental.md](novel_cdf_incremental.md)). It is
-not data, and DataHub's ingestion skips it.
+The exception is `gold.dp3_progress`, the bookkeeping table of the incremental DP3 run. It holds
+the fact versions that the last run processed ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
+It is not data, and DataHub's ingestion skips it.
 
-The source tables in `oms` are outside the convention: they belong to the order system, another
-department's database that the platform only reads.
+The source tables in `oms` are outside the convention. They belong to the order system, which is
+the database of another department. The platform only reads it.
 
 ## Source: `oms` (Postgres) and `app-exports` (SeaweedFS)
 
@@ -65,8 +66,8 @@ department's database that the platform only reads.
 
 ## Bronze: `raw_*` (Delta, written by DP1)
 
-Bronze is a copy of the sources, dirty values included. The `oms` tables are copied
-incrementally by change time, and the exports by export date with `mergeSchema`.
+Bronze is a copy of the sources, with the dirty values. DP1 copies the `oms` tables incrementally
+by change time, and the exports by export date with `mergeSchema`.
 
 | Table | Role |
 |---|---|
@@ -124,9 +125,9 @@ The features use only data from before `event_timestamp`, so they are point-in-t
 
 ## Warehouse: `dwh` (Postgres, written by DP2)
 
-The warehouse is the star schema for analysts and DBeaver. Its keys are declared, so the database
-enforces them: 7 primary keys and 8 foreign keys, among them `fact_delivery.drop_zone_id` →
-`dim_zone`.
+The warehouse is the star schema for analysts and DBeaver. It declares its keys, so the
+database enforces them. There are 7 primary keys and 8 foreign keys, among them
+`fact_delivery.drop_zone_id` → `dim_zone`.
 
 | Table | Rows | Role |
 |---|---|---|

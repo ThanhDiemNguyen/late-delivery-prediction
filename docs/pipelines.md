@@ -1,8 +1,9 @@
 # Pipelines: DP1, DP2 and DP3
 
 The platform's three data pipelines are Spark jobs in `jobs/`. Airflow runs them as three DAGs
-([airflow.md](airflow.md)). Each job starts through `jobs/common.py`, which stops with a clear
-message if the Spark settings (`infra/spark/conf/spark-defaults.conf`) were not loaded.
+([airflow.md](airflow.md)). Each job starts through `jobs/common.py`. If the Spark settings
+(`infra/spark/conf/spark-defaults.conf`) were not loaded, this module stops the job with a clear
+message.
 
 | Pipeline | From | To | Jobs |
 |---|---|---|---|
@@ -18,14 +19,14 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp1_inges
 docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp1_ingest.py --part exports       # oms | exports
 ```
 
-Bronze is a faithful copy. It keeps every source problem: legacy spellings, `NaN` literals, broken
-store coordinates, re-uploaded pings and both ping schemas. Each row gets two extra columns:
-`_ingested_at`, and `_source` (the `oms` table, or the export file's path).
+Bronze copies the sources as they are. It keeps every source problem: legacy spellings, `NaN`
+literals, broken store coordinates, re-uploaded pings and both ping schemas. The job adds two
+columns to each row: `_ingested_at`, and `_source` (the `oms` table, or the export file's path).
 
-The tables are written by path in `s3a://lakehouse/bronze/raw_<name>` and registered once with
-`CREATE TABLE IF NOT EXISTS … USING DELTA LOCATION`. Schema changes then live in the Delta log,
-and the job never asks the Hive Metastore to alter a table (Hive Metastore 3.1 rejects that for
-Delta tables).
+The job writes the tables by path in `s3a://lakehouse/bronze/raw_<name>`. It registers each table
+once with `CREATE TABLE IF NOT EXISTS … USING DELTA LOCATION`. The Delta log then holds the schema
+changes. The job never asks the Hive Metastore to alter a table, because Hive Metastore 3.1 rejects
+that for Delta tables.
 
 ### From `oms`: incremental by change time
 
@@ -37,10 +38,11 @@ Delta tables).
 | `customers` | `raw_customers` | `updated_ts` |
 | `orders` | `raw_orders` | `updated_ts` |
 
-For each table, the watermark is the newest change time already in bronze. The job reads only rows
-changed after it (and before the end of `--until`, a local LA date) with a JDBC query, and appends
-them. Bronze therefore keeps every version it pulled, and silver keeps the latest version of each
-key. Windows of 1 million rows or more are read in 8 parallel JDBC partitions, split by the key.
+For each table, the watermark is the newest change time already in bronze. A JDBC query reads only
+the rows changed after the watermark (and before the end of `--until`, a local LA date). The job
+appends these rows. Thus bronze keeps every version it pulled, and silver keeps the latest version
+of each key. When a window has 1 million rows or more, the job reads it in 8 parallel JDBC
+partitions, split by the key.
 
 ### From `app-exports`: incremental by export date
 
@@ -50,17 +52,18 @@ key. Windows of 1 million rows or more are read in 8 parallel JDBC partitions, s
 | `parcel_scans/export_date=*/` | `raw_parcel_scans` | `export_date` |
 
 **Which folders it reads.** The job lists the `export_date` folders that are complete (they hold
-`_SUCCESS`). It reads only those after the newest `export_date` already in bronze, and appends
-them.
+`_SUCCESS`). It reads only the folders after the newest `export_date` already in bronze, and
+appends them.
 
-**Schema evolution.** It reads with `mergeSchema` and appends with Delta's `mergeSchema`.
+**Schema evolution.** The job reads with `mergeSchema` and appends with Delta's `mergeSchema`.
 
-- **What it does:** from 2024-09-01 a folder holds v1 and v2 files, and the read takes the union of
-  both schemas. The append adds the v2 columns to the table.
-- **What it leaves to silver:** v1 rows have NULL `speed_mps`, `battery_pct` and `gps_accuracy_m`;
-  v2 rows have NULL `speed_kmh`. Silver unifies them.
-- **Without `mergeSchema`:** `--no-merge-schema` reads without it. Spark then takes one file's
-  schema and drops the other version's columns. That demo comes with the schema evolution write-up.
+- **What it does:** from 2024-09-01 on, a folder holds v1 and v2 files. The read takes the union of
+  both schemas, and the append adds the v2 columns to the table.
+- **What it leaves to silver:** v1 rows have NULL `speed_mps`, `battery_pct` and `gps_accuracy_m`,
+  and v2 rows have NULL `speed_kmh`. Silver unifies them.
+- **Without `mergeSchema`:** with `--no-merge-schema`, the job reads without it. Spark then takes
+  one file's schema and drops the other version's columns. That demo goes with the schema evolution
+  write-up.
 
 ### Checks on the dev slice (2026-10-23)
 
@@ -76,10 +79,10 @@ Three runs show the incremental load: up to 2024-07-31, then the rest, then once
 | `raw_courier_pings` | 61 dates, 15,127,140 | 122 dates | 49,350,264 | 49,350,264 (with the 2% re-uploads) |
 | `raw_parcel_scans` | 61 dates, 815,033 | 123 dates | 2,424,000 | 2,424,000 |
 
-- **Bronze matches the sources.** Every total equals its source count from `check_data`.
-- **Run times:** run 1 took 42 s and run 2 took 77 s.
-- **Rerun:** run 3 found nothing new in any table (28 s).
-- **Why only 6 couriers in run 1:** a courier row's `updated_ts` is its last change, and most
+- Bronze matches the sources: every total equals its source count from `check_data`.
+- Run 1 took 42 s and run 2 took 77 s.
+- Run 3 was the rerun and found nothing new in any table (28 s).
+- Run 1 loaded only 6 couriers, because a courier row's `updated_ts` is its last change and most
   couriers had a rating review after July. Run 2 brought the other 194.
 
 Trino lists all 7 tables in `delta.bronze`. The merged ping schema shows both app versions:
@@ -109,7 +112,7 @@ with the table:
   `changed_ts`);
 - the small reference tables in full.
 
-**What it checks for.** Bronze keeps the source problems on purpose, so the suite checks that the
+**What it checks for.** Bronze keeps the source problems on purpose. So the suite checks that the
 data is what the sources promise. It does not check that the data is clean.
 
 | Table | Expectations |
@@ -122,13 +125,13 @@ data is what the sources promise. It does not check that the data is clean.
 | `raw_courier_pings` | rows exist, all 16 columns of the merged v1 + v2 schema exist, keys not NULL, `app_version` 3.14.2 or 4.0.0, positions within a degree of the LA box |
 | `raw_parcel_scans` | rows exist, unique `scan_id`, keys not NULL, `scan_type` at_hub, picked_up or delivered |
 
-**Results.** The results go to `s3a://lakehouse/_validation/dp1/ds=<ds>/results.json`: one JSON
-document with every expectation, its outcome and the observed counts.
+**Results.** The job writes the results to `s3a://lakehouse/_validation/dp1/ds=<ds>/results.json`.
+This is one JSON document with every expectation, its outcome and the observed counts.
 
-- **Exit code:** with `--fail-on-error` the job exits 1 when any expectation fails.
+- **Exit code:** with `--fail-on-error`, the job exits 1 when any expectation fails.
 - **In Airflow:** the DAGs pass `--fail-on-error`, so a failed expectation fails the validate task.
-  Their `publish_assertions` task (trigger rule `all_done`) still sends the results to DataHub.
-- **`--corrupt`:** validates a corrupted copy of the same slice. It changes nothing in the
+  The DAGs' `publish_assertions` task (trigger rule `all_done`) still sends the results to DataHub.
+- **`--corrupt`:** the job validates a corrupted copy of the same slice. It changes nothing in the
   lakehouse.
 
 ### Checks on the dev slice (2024-09-07, a v2 rollout day)
@@ -158,11 +161,11 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_silve
 Silver has the same grain as bronze, with one row per real thing: one row per order, ping, scan,
 customer and hub.
 
-- **`oms` tables** are merged into silver by key (Delta `MERGE`). Only the bronze rows ingested
+- The job merges the `oms` tables into silver by key (Delta `MERGE`). Only the bronze rows ingested
   since the last run take part, and the newest version of each key wins.
-- **Export tables** process only the export dates silver has not seen. They are written with
-  dynamic partition overwrite, so a rerun of a date replaces that date's partition and nothing
-  else.
+- For the export tables, the job processes only the export dates that silver has not seen. It
+  writes them with dynamic partition overwrite, so a rerun of a date replaces that date's partition
+  and nothing else.
 
 | Silver table | From | Partitioned by |
 |---|---|---|
@@ -195,7 +198,7 @@ Silver also adds `distance_km` (hub to drop point) and `promised_min` (the SLA i
 
 ### Checks on the dev slice (2026-10-23)
 
-The first run took 203 s and a rerun 37 s, with nothing new to process. The counts come from
+The first run took 203 s. A rerun took 37 s, with nothing new to process. The counts come from
 Trino and `spark-sql`:
 
 | Check | Bronze | Silver |
@@ -215,7 +218,7 @@ Trino and `spark-sql`:
 | late share | | 17.56%, as in `oms` |
 
 The `picked_up` scans come from a separate source system (the courier-app export). Every rebuilt
-pickup time matching them shows that the rollover repair is right.
+pickup time matches these scans, which shows that the rollover repair is right.
 
 ## DP2: gold dimensions (`jobs/dp2_gold_dims.py`)
 
@@ -253,22 +256,22 @@ How a version is made:
 
 Courier 146 has 11 audit rows and 8 versions. Its reviews 376, 576 and 829 changed nothing.
 
-**Incremental load.** New audit rows are merged with one Delta `MERGE`:
+**Incremental load.** The job merges new audit rows with one Delta `MERGE`:
 
-- **What is new:** changes after the newest version's opening `change_id`.
-- **The comparison:** each courier's open version is put in front of its new changes, so the first
-  new change is compared with it.
+- **What is new:** the changes after the newest version's opening `change_id`.
+- **The comparison:** the job puts each courier's open version in front of its new changes. Thus
+  it compares the first new change with the open version.
 - **Two kinds of row in the `MERGE` source:**
-  - rows with a merge key close the open version: `valid_to_ts` is set to the first new start,
+  - rows with a merge key close the open version: they set `valid_to_ts` to the first new start,
     and `is_current` to false;
-  - rows without one are inserted as the new versions.
-- **Reruns:** no-op reviews after that `change_id` are compared again on the next run and open
-  nothing, so a rerun changes nothing.
+  - rows without a merge key become the new versions.
+- **Reruns:** the next run compares the no-op reviews after that `change_id` again, and they open
+  nothing. So a rerun changes nothing.
 
 ### Checks on the dev slice (2026-10-23)
 
-These were run against the dimension built in two ways: up to 2024-08-31 and then merged
-incrementally (481 versions, then 799), and as a full rebuild (799).
+These checks ran against the dimension built in two ways. One build went up to 2024-08-31 and then
+merged incrementally (481 versions, then 799). The other was a full rebuild (799).
 
 | Check | Result |
 |---|---|
@@ -297,16 +300,16 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_gold_
 | `fact_courier_activity_hourly` | one courier in one local hour | `courier_id`, `hub_id` → `dim_hub`, `date_key` → `dim_date`, `hour_start` | `ping_count`, `km_moved`, `idle_min`, `late_trip_min`, `avg_speed_kmh`, `trips` | `activity_date` |
 
 **Courier version at pickup.** `fact_delivery` joins each order to the `dim_courier` version
-that was valid when the parcel was picked up: `valid_from_ts <= pickup_ts < valid_to_ts`. So a
-rating change after the delivery does not change the courier's rating on that delivery. The label
-is `is_late = delivered_ts > promised_ts`.
+that was valid when the courier picked up the parcel. The join condition is
+`valid_from_ts <= pickup_ts < valid_to_ts`. So a rating change after the delivery does not change
+the courier's rating on that delivery. The label is `is_late = delivered_ts > promised_ts`.
 
 **Activity per courier hour.** `fact_courier_activity_hourly` joins the silver pings to `dim_hub`
-for the hub's area type and to `fact_delivery` on `trip_id` for `is_late`, then groups them by
-courier and local hour. About 30% of the pings are idle, with a NULL `trip_id`. In a plain join
-they would all land in one shuffle partition, so they skip the join and are added back with a
-NULL `is_late`. The skew and this fix are measured at 100 GB in
-[spark_optimization.md](spark_optimization.md).
+for the hub's area type. It also joins them to `fact_delivery` on `trip_id` for `is_late`, then
+groups them by courier and local hour. About 30% of the pings are idle, with a NULL `trip_id`. In
+a plain join, all of these pings would land in one shuffle partition. So the idle pings skip the
+join, and the job adds them back with a NULL `is_late`. The measurements of the skew and this fix
+at 100 GB are in [spark_optimization.md](spark_optimization.md).
 
 | Measure | How it is made |
 |---|---|
@@ -315,10 +318,10 @@ NULL `is_late`. The skew and this fix are measured at 100 GB in
 | `late_trip_min` | 25 s for each ping on a trip that ended late (`fact_delivery.is_late`) |
 | `avg_speed_kmh` | the mean speed of pings on a trip |
 
-**Rebuilds.** `fact_delivery` is merged by `order_id`. An existing order is rewritten only when one
-of its values really differs, and `--rebuild` rewrites it from silver. The activity fact adds only
-the ping dates it does not have yet, with dynamic partition overwrite. Both facts have Delta's
-Change Data Feed on, so DP3 can read just the rows a run changed
+**Rebuilds.** The job merges `fact_delivery` by `order_id`. It rewrites an existing order only when
+one of its values differs, and `--rebuild` rewrites the whole fact from silver. The activity fact
+adds only the ping dates it does not have yet, with dynamic partition overwrite. Both facts have
+Delta's Change Data Feed on, so DP3 can read only the rows that a run changed
 ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
 
 ### Checks on the dev slice (2026-10-23)
@@ -356,18 +359,18 @@ users, with declared keys (`jobs/sql/dwh_schema.sql`).
 | `fact_delivery` | the last 90 days of the period | `order_id` | `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date`, `drop_zone_id` → `dim_zone` |
 | `obt_delivery` | the last 30 days, one wide row per order | `order_id` | none: a one-big-table carries its dimensions' attributes on the row |
 
-**How it loads.** Postgres refuses to `TRUNCATE` one table that another references, and a reader
-should never see a half-loaded warehouse. So the job loads in three steps:
+**How it loads.** Postgres refuses to `TRUNCATE` one table that another table references. Also, a
+reader should never see a half-loaded warehouse. So the job loads in three steps:
 
-1. **Apply the DDL.** `CREATE TABLE IF NOT EXISTS`, with the keys.
-2. **Write staging.** Each table's rows go to `staging.<table>` with Spark JDBC.
-3. **Swap in one transaction.** It empties all seven tables together, inserts dimensions before facts
-   (so Postgres checks every foreign key on every row), and drops `staging`. A failure rolls the
-   whole swap back.
+1. **Apply the DDL.** The job runs `CREATE TABLE IF NOT EXISTS`, with the keys.
+2. **Write staging.** Spark JDBC writes each table's rows to `staging.<table>`.
+3. **Swap in one transaction.** The job empties all seven tables together and inserts dimensions
+   before facts, so Postgres checks every foreign key on every row. Then it drops `staging`. A
+   failure rolls the whole swap back.
 
 ### Checks on the dev slice (2026-10-23)
 
-These checks ran before `dim_zone` was added to the warehouse, so they show six tables.
+These checks ran before the warehouse had `dim_zone`, so they show six tables.
 
 | Check | Result |
 |---|---|
@@ -377,12 +380,12 @@ These checks ran before `dim_zone` was added to the warehouse, so they show six 
 | `staging` after the load | dropped; only `public` remains |
 | time | 30 s; a reload gives the same counts (33 s) |
 
-The fact row counts can be checked by hand:
+You can check the fact row counts by hand:
 
 - **Last 90 days:** 84 normal days × 4,000 orders plus the 6 Black Friday days × 12,000 = 408,000.
 - **Last 30 days:** 24 × 4,000 + 6 × 12,000 = 168,000.
 
-**DBeaver:** New connection, then PostgreSQL, with these settings:
+**DBeaver:** select New connection, then PostgreSQL, and use these settings:
 
 | Setting | Value |
 |---|---|
@@ -400,7 +403,7 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.
 ```
 
 DP1's suite accepts the source's dirty values. DP2's suite checks the opposite: silver and gold are
-clean, consistent and fully joined. It reads day `ds` of each table:
+clean, consistent and fully joined. The suite reads day `ds` of each table:
 
 | Dataset | Expectations |
 |---|---|
@@ -413,12 +416,12 @@ clean, consistent and fully joined. It reads day `ds` of each table:
 | `gold.fact_delivery` labels | the day's late share is between 8% and 30% |
 | `gold.fact_courier_activity_hourly` | rows exist; `(courier_id, hour_start)` unique; 1 to 144 pings, 0 to 60 idle minutes, 0 to 60 late-trip minutes (`late_trip_min`) and 0 to 120 km per hour |
 
-The two joined or derived datasets are built in the job (`DERIVED` in `jobs/validate.py`) and then
-checked like tables. That is how a single-table expectation library checks foreign keys.
+The job builds the two joined or derived datasets (`DERIVED` in `jobs/validate.py`) and then checks
+them like tables. In this way, a single-table expectation library checks foreign keys.
 
 ### Checks on the dev slice (2026-10-23)
 
-These two runs came before two checks were added, so the suite then had 60 expectations.
+These two runs came before the suite got two more checks, so it then had 60 expectations.
 
 | Day | Result | Exit code |
 |---|---|---|
@@ -427,8 +430,8 @@ These two runs came before two checks were added, so the suite then had 60 expec
 
 The H3 zones added the `dim_zone` coverage check (61 expectations). On 2026-10-23 the DP2 DAG run
 for 2024-11-30 passed 61 of 61 ([airflow.md](airflow.md#dp2-dp2_transform_validate)). The
-`late_trip_min` range came next (62). On 2026-10-24 the DAG run for 2024-11-29 passed 62 of 62
-([airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24)).
+`late_trip_min` range check came next (62). On 2026-10-24 the DAG run for 2024-11-29 passed 62 of
+62 ([airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24)).
 
 The DP1 suite still passes 73 of 73 on 2024-09-07 after the change.
 
@@ -452,15 +455,15 @@ Every row has two time columns:
   it is the end of the hour.
 - **`created`:** when the job computed the row.
 
-**Point-in-time correctness.** A delivery counts in a feature only once it was delivered, before
-the row's `event_timestamp`. The model's training join (in EDAI-2) takes, for each order, the
-latest feature row with `event_timestamp <= pickup_ts`. That join therefore never sees the order
-being scored or anything after it.
+**Point-in-time correctness.** A delivery counts in a feature row only if it was delivered before
+the row's `event_timestamp`. For each order, the model's training join (in EDAI-2) takes the
+latest feature row with `event_timestamp <= pickup_ts`. Thus that join never sees the order that
+the model scores, or anything after it.
 
-**The grid.** Each table is built on a full grid: every courier from its hiring day, every hub
-for every hour of the period, and every zone for every day. Days and hours with no activity are
-present, with 0 or NULL values, and the rolling windows (`rangeBetween` over a day or hour number)
-never skip a gap.
+**The grid.** The job builds each table on a full grid. The grid has every courier from its hiring
+day, every hub for every hour of the period, and every zone for every day. Days and hours with no
+activity are present, with 0 or NULL values. The rolling windows (`rangeBetween` over a day or
+hour number) never skip a gap.
 
 ### Checks on the dev slice (2026-10-23)
 
@@ -488,7 +491,7 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.
 
 ### Checks on the dev slice (2026-10-23)
 
-These two runs came before `feat_zone_daily` was added, so the suite then had 23 expectations.
+These two runs came before the suite covered `feat_zone_daily`, so it then had 23 expectations.
 
 | Day | Result | Exit code |
 |---|---|---|
@@ -500,19 +503,19 @@ With `feat_zone_daily` the suite has 31 expectations. On 2026-10-24 the DP3 DAG 
 
 ### DP2 pitfalls
 
-- **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
-  because the seed has no orders between 01:00 and 07:59 local time. The standard-time rule is in
-  place, but no data row exercises it.
-- **Exact distinct counts belong in Spark.** Trino's 2 GB limit gives about 500 MB per query, which
+- **No data tests the repeated hour.** No order falls in the repeated hour of 2024-11-03, because
+  the seed has no orders between 01:00 and 07:59 local time. The standard-time rule is in place,
+  but no data row tests it.
+- **Exact distinct counts belong in Spark.** Trino's 2 GB limit gives about 500 MB per query. That
   is too little for an exact distinct count over 48 million ping keys.
 
 ### DP1 pitfalls
 
-- **Watermark time zone.** The watermark is formatted by Spark in the session time zone (UTC),
-  not by Python, whose time zone depends on the container.
-- **Equal change times.** The pull uses `>` the watermark. A row written later with exactly the
-  watermark's timestamp would be missed. The generator never does that, and a real OMS would need
-  a change sequence number.
+- **Watermark time zone.** Spark formats the watermark in the session time zone (UTC). Python
+  does not format it, because Python's time zone depends on the container.
+- **Equal change times.** The pull uses `>` the watermark. If a row written later has exactly
+  the watermark's timestamp, the pull misses it. The generator never writes such a row, and a real
+  order management system would need a change sequence number.
 - **Missing settings.** If the Spark settings are missing, S3A sends requests to Amazon's public
   endpoint, which answers `InvalidAccessKeyId`. `jobs/common.py` stops the job before that
   ([lakehouse.md](lakehouse.md#decisions-and-pitfalls)).

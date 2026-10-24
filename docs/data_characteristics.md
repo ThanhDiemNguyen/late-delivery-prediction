@@ -1,15 +1,15 @@
 # Data characteristics
 
-What the generated source data looks like: its volume, which columns are skewed and by how much,
-which columns have high cardinality, the schema before and after the app v2 change, and the
-duplicate and dirty-value rates. How each part is generated is in
-[data_generator.md](data_generator.md).
+This page describes the generated source data. It gives the volume, the skewed columns and how
+much each one is skewed, and the columns with high cardinality (many distinct values). It also
+gives the schema before and after the app v2 change, and the duplicate and dirty-value rates. For
+how each part is generated, see [data_generator.md](data_generator.md).
 
-The numbers below were measured at full scale on 2026-10-24, with
-`uv run python -m generator.check_data --scale 1.0`. They are measured, not targets: all 29 checks
-passed. The run took 26.9 minutes on the Mac. It reads `oms` with SQL and the exports one file at a
-time, so its memory stays at one file. The 1% development slice gave the same rates (28 of 28
-checks on 2026-10-23).
+`uv run python -m generator.check_data --scale 1.0` measured the numbers below on 2026-10-24, at
+full scale. They are measured values, not targets, and all 29 checks passed. The run took 26.9
+minutes on the Mac. It reads `oms` with SQL and reads the exports one file at a time, so it holds
+only one file in memory. The 1% development slice gave the same rates (28 of 28 checks on
+2026-10-23).
 
 ## Volume
 
@@ -23,21 +23,21 @@ checks on 2026-10-23).
 | SeaweedFS `app-exports` | `parcel_scans` | 242,400,000 (10.2 B/row) | **2.48 GB** | 366 |
 | **Total** | | | **110.19 GB** | |
 
-Generation took 1 h 37 min on 2026-10-24, run unattended (`--scale 1.0`, the same seed as the
-slice):
+Generation ran unattended on 2026-10-24, with `--scale 1.0` and the same seed as the slice, and
+took 1 h 37 min:
 
 - the reference data in 44 s;
 - the 80.8 million orders, copied into `oms` day by day, in 49 min;
 - the exports, built by 6 workers and uploaded with one PUT per file, in 47 min.
 
-The dry run had projected 23.4 GB for `oms`, from the 290 bytes per order (indexes included)
-measured on the slice. At full scale `orders` takes 18,140 MB with its indexes, about 225 bytes
+The dry run (next section) projected 23.4 GB for `oms`, from the 290 bytes per order (indexes
+included) measured on the slice. At full scale `orders` takes 18,140 MB with its indexes, about 225 bytes
 per order, so `oms` is 18.89 GB. The total is still above 100 GB.
 
 ### Full-scale parameters, fixed by the dry run
 
 `uv run python -m generator.dry_run --workers 6` builds one v1 day (2024-06-03) and one v2 day
-(2024-10-01) at full scale in memory and serialises every file as the export does.
+(2024-10-01) at full scale in memory. It serialises every file as the export does.
 
 | Measured on one full day | 2024-06-03 (v1) | 2024-10-01 (v2) |
 |---|---:|---:|
@@ -76,8 +76,8 @@ measured total is in the volume table above.
 | `orders.weather` | Sunny 62%, Cloudy 14%, Fog 12%, Windy 7%, Stormy 5% | as generated |
 | `orders.order_date` | 2× in the mid-July sale week, 3× in Black Friday week | 1,200,000 orders a day in Black Friday week against 400,000 |
 
-The label is skewed too, by design: 17.43% of orders are late. By traffic it is Low 7.0%,
-Medium 14.9%, High 23.0% and Jam 24.3%.
+The label (late or not) is skewed too, by design: 17.43% of orders are late. By traffic, the late
+rate is Low 7.0%, Medium 14.9%, High 23.0% and Jam 24.3%.
 
 ## High-cardinality columns
 
@@ -93,7 +93,7 @@ Medium 14.9%, High 23.0% and Jam 24.3%.
 
 ## Schema before and after the app v2 change
 
-Pings from phones on app v1 and app v2 sit in the same `export_date` folders from 2024-09-01, in
+From 2024-09-01, pings from phones on app v1 and app v2 are in the same `export_date` folders, in
 separate files (`part-NNNNN.parquet` and `part-NNNNN-v2.parquet`).
 
 | v1 (`app_version` 3.14.2) | v2 (`app_version` 4.0.0) | Change |
@@ -136,4 +136,5 @@ The rates come from the seed file, so they match it:
 | Legacy spellings: trailing spaces, `"Metropolitian "` | every row | every row |
 
 In `oms.courier_changes`, 32.8% of the rows after a courier's hiring change nothing: they are
-rating reviews that kept the rating. The SCD2 dimension has to skip them.
+rating reviews that kept the rating. The SCD2 dimension (a slowly changing dimension that keeps one
+row for each version) must skip them.
