@@ -52,8 +52,8 @@ Every box is a deployable unit: a container of one Compose profile (its tag) or 
 Mac. Each arrow carries the data named on it, from the unit that sends the data to the unit that
 receives it. B1 and S2 carry no data: they point from the caller to the unit it calls. Each flow
 has its own colour and its own numbers, and two arrows cross only where the line shows a gap.
-The dashed boxes are support units whose arrows are left out: the Airflow webserver (it reads the
-`airflow` database) and OpenSearch (DataHub's search index).
+The dashed box is a support unit whose arrows are left out: the Airflow webserver, which reads the
+`airflow` database and shows the DAG runs.
 
 The script [`docs/diagrams/draw.py`](docs/diagrams/draw.py) draws both pictures (stdlib Python;
 PNG through headless Chrome). It reads two sources for each picture. The topology is in

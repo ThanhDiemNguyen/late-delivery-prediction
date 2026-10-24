@@ -44,7 +44,7 @@ boxes = {
     "trino": box(2, 2, "query", "compute", ["SQL on the lakehouse", ":8090"]),
     "frontend": box(3, 0, "gov", "ui", ["catalog UI :9002"]),
     "gms": box(3, 1, "gov", "catalog", ["metadata service", ":8083"]),
-    "opensearch": box(4, 1, "gov", "search", ["search index"], "support"),
+    "opensearch": box(4, 1, "gov", "search", ["DataHub search index"]),
     "webserver": box(3, 2, "orch", "ui", ["UI :8082"], "support"),
     "flink": box(4, 2, "stream", "stream", ["jobmanager + taskmanager", "scan_windows.py"]),
     "kafka": box(5, 2, "core", "queue", ["parcel-scans", "hub-delivery-5m, scans-late"]),
@@ -117,7 +117,7 @@ LAYOUT = {
     "legend": {"y": 990, "notes": [
         "An arrow carries the data named on it, from the unit that sends it to the unit that receives it.",
         "B1 and S2 carry no data: they point from the caller to the unit it calls.",
-        "Dashed boxes are support units; their arrows are left out (the webserver reads the airflow",
-        "database, OpenSearch holds DataHub's search index).",
+        "The dashed box is a support unit whose arrows are left out: the Airflow webserver, which reads",
+        "the airflow database and shows the DAG runs.",
     ]},
 }
