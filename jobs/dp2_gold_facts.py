@@ -1,7 +1,8 @@
 """DP2, gold facts: fact_delivery (one row per order) and fact_courier_activity_hourly.
 
-    spark-submit /opt/jobs/dp2_gold_facts.py              # fact_delivery again, new ping dates for activity
-    spark-submit /opt/jobs/dp2_gold_facts.py --rebuild    # every ping date again
+    spark-submit /opt/jobs/dp2_gold_facts.py                        # MERGE new and changed orders, add new ping dates
+    spark-submit /opt/jobs/dp2_gold_facts.py --rebuild              # rewrite both facts from silver
+    spark-submit /opt/jobs/dp2_gold_facts.py --rebuild --until 2024-10-31   # as of a local date (incremental demo)
 
 fact_delivery joins each order to the dim_courier version that was valid when the parcel was
 picked up (valid_from_ts <= pickup_ts < valid_to_ts), so a later rating or vehicle change does not
@@ -11,9 +12,15 @@ rewrite history. It carries the label: is_late = delivered_ts > promised_ts, and
 fact_courier_activity_hourly sums the silver pings per courier and local hour: ping count, km moved
 (between consecutive pings), idle minutes (pings with no trip) and mean speed while on a trip. The
 pings are joined to dim_hub for the hub's area type.
+
+Both facts have Delta's Change Data Feed on, so DP3 can read just the rows each run changed
+(novel idea 2, docs/novel_cdf_incremental.md). fact_delivery is therefore merged by order_id, and
+a matched order is updated only when one of its values really changed.
 """
 
 import argparse
+
+from delta.tables import DeltaTable
 
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
@@ -25,11 +32,22 @@ PING_INTERVAL_MIN = 25 / 60
 
 
 def save(df: DataFrame, table: str, partition_by: str, dynamic: bool) -> None:
-    """Write the Delta table at GOLD/<table> (only df's partitions if dynamic) and register it."""
+    """Write the Delta table at GOLD/<table> (only df's partitions if dynamic), register it, turn on CDF.
+
+    The Change Data Feed property is set through the table's path, so only the Delta log changes
+    and the Hive Metastore entry is never altered.
+    """
+    path = f"{GOLD}/{table}"
     writer = df.write.format("delta").mode("overwrite").partitionBy(partition_by)
     writer = writer.option("partitionOverwriteMode", "dynamic") if dynamic else writer.option("overwriteSchema", "true")
-    writer.save(f"{GOLD}/{table}")
-    df.sparkSession.sql(f"CREATE TABLE IF NOT EXISTS gold.{table} USING DELTA LOCATION '{GOLD}/{table}'")
+    writer.save(path)
+    df.sparkSession.sql(f"CREATE TABLE IF NOT EXISTS gold.{table} USING DELTA LOCATION '{path}'")
+    df.sparkSession.sql(f"ALTER TABLE delta.`{path}` SET TBLPROPERTIES (delta.enableChangeDataFeed = true)")
+
+
+# A matched order is rewritten only when one of these differs (NULL-safe), so CDF lists real changes.
+FACT_COMPARED = ["courier_sk", "order_ts", "pickup_ts", "delivered_ts", "promised_ts", "is_late", "distance_km",
+                 "traffic", "weather", "vehicle", "area", "category", "drop_zone_id"]
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -39,9 +57,12 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return 2 * 6371.0 * F.asin(F.sqrt(a))
 
 
-def build_fact_delivery(spark: SparkSession) -> None:
-    """Rebuild fact_delivery from silver orders and the courier version valid at pickup."""
-    orders = spark.table("silver.stg_orders").alias("o")
+def build_fact_delivery(spark: SparkSession, until: str | None, rebuild: bool) -> None:
+    """Merge (or with rebuild, rewrite) fact_delivery from silver orders and the courier version at pickup."""
+    orders = spark.table("silver.stg_orders")
+    if until:
+        orders = orders.where(F.to_date(F.from_utc_timestamp("delivered_ts", LA)) <= F.lit(until))
+    orders = orders.alias("o")
     versions = spark.table("gold.dim_courier").select("courier_sk", "courier_id", "valid_from_ts", "valid_to_ts").alias("v")
     valid_at_pickup = (
         (F.col("o.courier_id") == F.col("v.courier_id"))
@@ -62,14 +83,26 @@ def build_fact_delivery(spark: SparkSession) -> None:
         F.expr("ST_H3CellIDs(ST_Point(o.drop_lon, o.drop_lat), 7, true)[0]").alias("drop_zone_id"),
         F.date_format(local_order, "yyyy-MM").alias("order_month"),
     )
-    save(fact, "fact_delivery", "order_month", dynamic=False)
+    if rebuild or not spark.catalog.tableExists("gold.fact_delivery"):
+        save(fact, "fact_delivery", "order_month", dynamic=False)
+    else:
+        changed = " OR ".join(f"NOT (t.{c} <=> s.{c})" for c in FACT_COMPARED)
+        (
+            DeltaTable.forName(spark, "gold.fact_delivery").alias("t")
+            .merge(fact.alias("s"), "t.order_id = s.order_id AND t.order_month = s.order_month")
+            .whenMatchedUpdateAll(condition=changed)
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
     print(f"gold.fact_delivery: {spark.table('gold.fact_delivery').count():,} rows")
 
 
-def build_fact_activity(spark: SparkSession, rebuild: bool) -> None:
+def build_fact_activity(spark: SparkSession, until: str | None, rebuild: bool) -> None:
     """Add the ping dates fact_courier_activity_hourly does not have yet (all of them with rebuild)."""
     table = "gold.fact_courier_activity_hourly"
     pings = spark.table("silver.stg_courier_pings")
+    if until:
+        pings = pings.where(F.col("ping_date") <= F.lit(until))
     if not rebuild and spark.catalog.tableExists(table):
         done = spark.table(table).agg(F.max("activity_date")).first()[0]
         pings = pings.where(F.col("ping_date") > F.lit(done))
@@ -101,11 +134,12 @@ def build_fact_activity(spark: SparkSession, rebuild: bool) -> None:
 def main() -> None:
     """Build the gold facts."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--rebuild", action="store_true", help="rebuild every ping date of the activity fact")
+    parser.add_argument("--rebuild", action="store_true", help="rewrite both facts from silver")
+    parser.add_argument("--until", help="only orders delivered and pings sent up to this local date")
     args = parser.parse_args()
     spark = with_sedona(lakehouse_session("dp2_gold_facts"))
-    build_fact_delivery(spark)
-    build_fact_activity(spark, args.rebuild)
+    build_fact_delivery(spark, args.until, args.rebuild)
+    build_fact_activity(spark, args.until, args.rebuild)
     spark.stop()
 
 

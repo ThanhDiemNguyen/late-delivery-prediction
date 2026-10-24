@@ -310,8 +310,11 @@ for the hub's area type and groups them by courier and local hour:
 | `idle_min` | 25 s for each ping without a trip |
 | `avg_speed_kmh` | the mean speed of pings on a trip |
 
-**Rebuilds.** `fact_delivery` is rebuilt on each run. The activity fact adds only the ping dates
-it does not have yet, with dynamic partition overwrite.
+**Rebuilds.** `fact_delivery` is merged by `order_id`. An existing order is rewritten only when one
+of its values really differs, and `--rebuild` rewrites it from silver. The activity fact adds only
+the ping dates it does not have yet, with dynamic partition overwrite. Both facts have Delta's
+Change Data Feed on, so DP3 can read just the rows a run changed
+([novel_cdf_incremental.md](novel_cdf_incremental.md)).
 
 ### Checks on the dev slice (2026-10-23)
 
@@ -418,7 +421,8 @@ The DP1 suite still passes 73 of 73 on 2024-09-07 after the change.
 ## DP3: offline feature tables (`jobs/dp3_features.py`)
 
 ```bash
-docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp3_features.py
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp3_features.py                 # full recompute
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp3_features.py --incremental   # from the facts' CDF
 ```
 
 | Feature table | Entity and grain | Features | Built from |
