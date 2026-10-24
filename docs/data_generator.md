@@ -1,8 +1,8 @@
 # Data generator
 
 The generator makes all of LastLeg Logistics' source data on the Mac (host Python, not Docker).
-This page grows with each generator step. So far it covers the seed, the delivery-time model, and
-the reference data and orders in the order system (`oms`).
+This page grows with each generator step. So far it covers the seed, the delivery-time model, the
+reference data and orders in the order system (`oms`), and the courier-app exports in SeaweedFS.
 
 ## The seed
 
@@ -258,6 +258,83 @@ after loading the dev slice:
 | Area mix | Metropolitan 55.08%, Urban 35.23%, Semi-Urban 6.67%, Other 3.02% |
 | Black Friday week | 12,000 orders a day, 3× normal |
 | Size | `oms` is 238 MB (about 280 B per order with its indexes), so about 23 GB at full scale |
+
+## Courier-app exports in SeaweedFS
+
+```bash
+uv run python -m generator.app_exports --scale 0.01 --workers 6   # after the oms load, same scale and seed
+```
+
+The courier-app team's daily exports are a second source system: Parquet files in the
+`app-exports` bucket, in one `export_date=YYYY-MM-DD` folder per local day. A `_SUCCESS` marker
+closes each folder.
+
+**No local files.** Each file is built in memory and uploaded with one PUT, so the Mac's disk never
+holds a copy. A single PUT also makes the object's ETag its MD5.
+
+**Matching the database.** The orders are rebuilt in memory from the same seed as the `oms` load,
+so every scan and trip matches a row in `oms.orders`. The exporter stops with an error if the
+rebuilt order count differs from the one in `oms`.
+
+### GPS pings (`courier_pings/`, schema v1)
+
+| Column | Type | Meaning |
+|---|---|---|
+| `courier_id` | int32 | the courier |
+| `device_seq` | int64 | the phone's ping counter; with `courier_id`, identifies a ping |
+| `hub_id` | int16 | the courier's home hub that day (carries the skew: Downtown LA has 25% of couriers) |
+| `trip_id` | int64, nullable | the order the courier is delivering; NULL between trips |
+| `ping_ts` | timestamp (UTC) | when the phone took the fix |
+| `lat`, `lon` | float64 | position, 6 decimals |
+| `speed_kmh` | int16 | speed |
+| `app_version` | string | `3.14.2` |
+| `uploaded_ts` | timestamp (UTC) | when the phone uploaded it; phones upload every 5 minutes |
+
+The rules:
+
+- **Shifts.** Every courier hired before the day works a 10-hour local shift and sends a fix every
+  25 s, which is 1,440 pings. Couriers with an even id work 07:00 to 17:00, odd ids 14:00 to 24:00.
+- **Trips.** A shift alternates trips (30 minutes on average) and idle gaps, sized so that 30% of
+  pings are idle and carry a NULL `trip_id`. Each trip takes the courier's next order of the day,
+  in pickup order. That is what the skew benchmark joins on:
+  `pings LEFT JOIN orders ON trip_id = order_id`, where the NULL keys pile up.
+- **Movement.** While on a trip, speed is the vehicle's mean (van 24, car 28, e-bike 16 km/h) times
+  random noise; idle couriers move 0 to 2 km/h. The heading drifts, and a pull toward the hub
+  keeps couriers a median 5.8 km away (95% within 11.4 km). GPS noise is about 8 m.
+- **Files.** One file per 278 couriers per day (278 × 1,440 = 400,320 rows). Each file has its own
+  random seed from (seed, day, file), so files can be built in parallel and in any order.
+
+### Parcel scans (`parcel_scans/`)
+
+Three scans per order:
+
+1. **`at_hub`:** by hub staff, so `courier_id` is NULL. It comes between the order and the pickup.
+2. **`picked_up`:** at the pickup time.
+3. **`delivered`:** at `delivered_ts`.
+
+Columns: `scan_id`, `order_id`, `courier_id`, `hub_id`, `scan_type`, `scan_ts`, `uploaded_ts`.
+Handhelds upload 1 to 120 s after the scan. A scan is exported on the local date of its `scan_ts`.
+So a parcel delivered after midnight has its `delivered` scan in the next day's folder. Each file
+holds one order day's scans for one export date (`orders-YYYY-MM-DD.parquet`).
+
+### Checks
+
+`tests/test_app_exports.py` checks the ping schema and spacing, the shift hours, the idle share, that
+every `trip_id` is one of the courier's own orders, that couriers stay near their hub, the scan
+lifecycle order, and byte-identical rebuilds. The dev slice in SeaweedFS:
+
+| Check | Result |
+|---|---|
+| Pings | 183 files, 48,382,560 rows, 0.84 GB (17.3 B per row) |
+| Scans | 366 files, 2,424,000 rows (3 per order) |
+| Time | 14 s for the whole period with 6 workers |
+| Rerun | all 916 objects have the same ETag (MD5) after a second run |
+| Pings against `oms` (2024-08-15) | 2,528 trip ids, all found in `oms.orders`, each with the same courier |
+| Scans against `oms` (2024-08-15) | 3,107 `delivered` scans, all with the order's courier and `delivered_ts` |
+
+At 17.3 B per row, full scale (about 4.8 billion pings) comes to about 84 GB of pings. Adding the
+scans (about 4 GB) and `oms` (about 23 GB) gives about 111 GB of source data. The one-day dry run
+fixes the full-scale numbers.
 
 ## Limits
 

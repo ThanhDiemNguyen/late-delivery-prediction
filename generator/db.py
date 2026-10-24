@@ -17,8 +17,8 @@ ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 COPY_CHUNK_ROWS = 500_000
 
 
-def read_env(path: Path = ENV_FILE) -> dict[str, str]:
-    """Return KEY=VALUE pairs from the .env file, overridden by the process environment."""
+def read_env(path: Path = ENV_FILE, prefixes: tuple[str, ...] = ("POSTGRES_",)) -> dict[str, str]:
+    """Return KEY=VALUE pairs from the .env file, overridden by process variables with these prefixes."""
     values: dict[str, str] = {}
     if path.exists():
         for line in path.read_text().splitlines():
@@ -26,7 +26,7 @@ def read_env(path: Path = ENV_FILE) -> dict[str, str]:
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
                 values[key.strip()] = value.strip().strip('"').strip("'")
-    values.update({k: v for k, v in os.environ.items() if k.startswith("POSTGRES_")})
+    values.update({k: v for k, v in os.environ.items() if k.startswith(prefixes)})
     return values
 
 

@@ -167,6 +167,8 @@ def build_day(
         }
     )
     orders["updated_ts"] = orders.delivered_ts
+    # The clean instants are kept for the scan export; the order system stores only ORDER_COLUMNS.
+    orders["order_ts"], orders["pickup_ts"] = order_ts, pickup_ts
     # Number the orders in time order. Sort by the instant, not the local text, which repeats an
     # hour when daylight saving time ends (2024-11-03).
     orders = orders.iloc[np.argsort(order_ts.to_numpy(), kind="stable")].reset_index(drop=True)
