@@ -8,4 +8,17 @@ Documents are added here as each part is built.
 
 | Document | Covers |
 |---|---|
-| (none yet) | The first document arrives with the core services. |
+| [environment.md](environment.md) | The machine, every pinned image (arm64, size, idle memory), PyFlink on arm64, and the safe stop and unplug procedure |
+| [lakehouse.md](lakehouse.md) | Hive Metastore, Spark standalone, Delta Lake and Trino: services, the Spark image, the smoke test, DBeaver settings, the Delta/Spark pairing |
+| [core_services.md](core_services.md) | Postgres, SeaweedFS and Kafka: what they hold, how to start them, verification, pitfalls |
+| [data_generator.md](data_generator.md) | The seed, the delivery-time model, the LA config and SLA rule, the OMS reference data (hubs, couriers and their audit, customers) and orders with their dirty values, the courier-app ping and scan exports (app v2 schema change, re-uploaded duplicates), and their checks |
+| [data_characteristics.md](data_characteristics.md) | The generated data: volume, skewed and high-cardinality columns, schema before and after app v2, duplicate and dirty-value rates (measured by check_data) |
+| [pipelines.md](pipelines.md) | DP1 to DP3 Spark jobs: DP1 incremental ingest into bronze (JDBC by change time, exports by export date with mergeSchema) , its Great Expectations suite, DP2 silver (cleaning, dedup, v1/v2 unification) gold dimensions (SCD2 dim_courier) and facts, the dwh star schema with declared keys, the DP2 validation suite, and DP3 feature tables (point-in-time) and their suite |
+| [novel_h3_sedona.md](novel_h3_sedona.md) | Novel idea 1: H3 delivery zones with Apache Sedona (dim_zone, drop_zone_id, feat_zone_daily) and the proofs that it worked |
+| [novel_cdf_incremental.md](novel_cdf_incremental.md) | Novel idea 2: incremental DP3 from Delta's Change Data Feed, and the proof that it equals a full recompute |
+| [airflow.md](airflow.md) | Airflow: the image with a Spark client, services, connections, variables and pool from .env, the DP1 to DP3 DAGs and the failure drill |
+| [datahub.md](datahub.md) | DataHub: services, schema ingestion of every zone (Trino, Postgres, Kafka recipes), Airflow lineage of DP1 to DP3, and the Great Expectations results as assertions |
+| [schema_design.md](schema_design.md) | The tables of every zone and their roles, relationship diagrams from the live catalog (dwh's declared keys), SCD2 and feat_ time columns, and the naming check |
+| [spark_optimization.md](spark_optimization.md) | Spark at 100 GB: the NULL-key skew join (baseline out of memory, AQE, NULL isolation, salting) with Spark UI screenshots and the fix in DP2; schema evolution of the app v2 pings; the dedup benchmark (window against targeted) |
+| [storage_optimization.md](storage_optimization.md) | Warehouse indexes on obt_delivery (B-tree, partial, BRIN with an ordered load) measured with EXPLAIN (ANALYZE, BUFFERS); lakehouse file layout |
+| [streaming.md](streaming.md) | The live parcel-scan stream: topics, the event, the producer's late arrivals (8%) and retries (1.50%) and their measurement; the Flink session cluster, the 5-minute window job and its three modes (baseline, allowed lateness, keyed dedup with state TTL), paced runs checked against the truth, and their results |

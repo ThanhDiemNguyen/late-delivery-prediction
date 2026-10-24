@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2420 1140" width="2420" height="1140" font-family="'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif"><title>System architecture: the deployable units and the data they exchange</title>
+<defs><marker id="head-D" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#9c36b5"/></marker><marker id="head-B" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1971c2"/></marker><marker id="head-S" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#e8590c"/></marker><marker id="head-G" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f9e44"/></marker><marker id="head-plain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5c677d"/></marker></defs>
+<rect width="2420" height="1140" fill="#f6f7f9"/>
+<text x="32" y="46" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" letter-spacing="2.4" fill="#465165">LASTLEG LOGISTICS · EDAI-1 DATA PLATFORM</text>
+<text x="32" y="78" font-size="23" fill="#1f2633">System architecture: the deployable units and the data they exchange</text>
+<rect x="20" y="112" width="236" height="834" rx="12" fill="#f9fafb" stroke="#d6dbe4" stroke-width="1.2" stroke-dasharray="6 5"/>
+<text x="36" y="136" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" letter-spacing="1.6" font-weight="600" fill="#465165">MAC<tspan dx="12" font-weight="400" letter-spacing="0.4" fill="#8790a2">host process</tspan></text>
+<rect x="280" y="112" width="1800" height="834" rx="12" fill="#eceff4" stroke="#d6dbe4" stroke-width="1.2"/>
+<text x="296" y="136" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" letter-spacing="1.6" font-weight="600" fill="#465165">DOCKER DESKTOP VM<tspan dx="12" font-weight="400" letter-spacing="0.4" fill="#8790a2">compose project late-delivery-prediction · tag = compose profile</tspan></text>
+<rect x="2104" y="112" width="296" height="834" rx="12" fill="#f9fafb" stroke="#d6dbe4" stroke-width="1.2" stroke-dasharray="6 5"/>
+<text x="2120" y="136" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" letter-spacing="1.6" font-weight="600" fill="#465165">MAC<tspan dx="12" font-weight="400" letter-spacing="0.4" fill="#8790a2">host processes, users</tspan></text>
+<rect x="40" y="500" width="196" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="48" y="508" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="54" y="519.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">host</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="210" y="510" width="16" height="14" rx="2"/><path d="M213.5 515l3 2-3 2M218 520h4"/></g>
+<text x="138.0" y="538.0" text-anchor="middle" font-size="15" fill="#1f2633">Data generator</text>
+<text x="138.0" y="556.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">generator/*.py</text>
+<text x="138.0" y="570.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">--scale 1.0: 110.19 GB</text>
+<rect x="300" y="152" width="1736" height="70" rx="7" fill="#ecf1f9" stroke="#8497ba" stroke-width="1.3"/>
+<rect x="308" y="160" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="314" y="171.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">core</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="2018" cy="164" rx="7" ry="2.6"/><path d="M2011 164v10c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V164"/><path d="M2011 169c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/></g>
+<text x="1168.0" y="189.0" text-anchor="middle" font-size="15" fill="#1f2633">Postgres 16</text>
+<text x="1168.0" y="207.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">oms (the order system, a source)  ·  dwh (the star schema)  ·  airflow, metastore, datahub (metadata of the services)</text>
+<rect x="300" y="852" width="1736" height="70" rx="7" fill="#ecf1f9" stroke="#8497ba" stroke-width="1.3"/>
+<rect x="308" y="860" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="314" y="871.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">core</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2011 864h14l-1.6 12.5h-10.8z"/><ellipse cx="2018" cy="864" rx="7" ry="1.8"/></g>
+<text x="1168.0" y="889.0" text-anchor="middle" font-size="15" fill="#1f2633">SeaweedFS (S3)</text>
+<text x="1168.0" y="907.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">s3://app-exports (the app's export files, a source)  ·  s3://lakehouse: bronze, silver, gold, _validation (Delta Lake)</text>
+<rect x="622" y="304" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="630" y="312" width="43.5" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="636" y="323.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">batch</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="786" y="314" width="16" height="13" rx="2"/><path d="M786 318h16"/><path d="M791 330h6"/></g>
+<text x="717.0" y="349.0" text-anchor="middle" font-size="15" fill="#1f2633">Spark history server</text>
+<text x="717.0" y="367.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">Spark UI :18080</text>
+<rect x="316" y="500" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="324" y="508" width="43.5" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="330" y="519.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">batch</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="481" y="510" width="14" height="14" rx="2.5"/><path d="M485 514h6v6h-6z"/><path d="M485 508v2M491 508v2M485 524v2M491 524v2M479 514h2M479 520h2M495 514h2M495 520h2"/></g>
+<text x="411.0" y="538.0" text-anchor="middle" font-size="15" fill="#1f2633">Spark 3.5.9</text>
+<text x="411.0" y="556.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">master + worker</text>
+<text x="411.0" y="570.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">4 cores, 2 GB executor</text>
+<rect x="622" y="500" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="630" y="508" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="636" y="519.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">orch</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="794" cy="517" r="7.5"/><path d="M794 512.5v4.5l3 2"/></g>
+<text x="717.0" y="538.0" text-anchor="middle" font-size="15" fill="#1f2633">Airflow scheduler</text>
+<text x="717.0" y="556.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">DP1 → DP2 → DP3</text>
+<text x="717.0" y="570.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">Spark drivers (client)</text>
+<rect x="622" y="696" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="630" y="704" width="43.5" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="636" y="715.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">batch</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="794" cy="708" rx="7" ry="2.6"/><path d="M787 708v10c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V708"/><path d="M787 713c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/></g>
+<text x="717.0" y="741.0" text-anchor="middle" font-size="15" fill="#1f2633">Hive Metastore</text>
+<text x="717.0" y="759.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">tables of every zone</text>
+<rect x="928" y="696" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="936" y="704" width="43.5" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="942" y="715.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">query</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1093" y="706" width="14" height="14" rx="2.5"/><path d="M1097 710h6v6h-6z"/><path d="M1097 704v2M1103 704v2M1097 720v2M1103 720v2M1091 710h2M1091 716h2M1107 710h2M1107 716h2"/></g>
+<text x="1023.0" y="734.0" text-anchor="middle" font-size="15" fill="#1f2633">Trino 479</text>
+<text x="1023.0" y="752.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">SQL on the lakehouse</text>
+<text x="1023.0" y="766.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">:8090</text>
+<rect x="1234" y="304" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="1242" y="312" width="30.9" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="1248" y="323.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">gov</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1398" y="314" width="16" height="13" rx="2"/><path d="M1398 318h16"/><path d="M1403 330h6"/></g>
+<text x="1329.0" y="349.0" text-anchor="middle" font-size="15" fill="#1f2633">DataHub frontend</text>
+<text x="1329.0" y="367.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">catalog UI :9002</text>
+<rect x="1234" y="500" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="1242" y="508" width="30.9" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="1248" y="519.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">gov</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="1401" cy="517" r="2.6"/><circle cx="1411" cy="512" r="2.6"/><circle cx="1411" cy="522" r="2.6"/><path d="M1403.4 516l5.2-2.8M1403.4 518l5.2 2.8"/></g>
+<text x="1329.0" y="538.0" text-anchor="middle" font-size="15" fill="#1f2633">DataHub GMS</text>
+<text x="1329.0" y="556.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">metadata service</text>
+<text x="1329.0" y="570.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">:8083</text>
+<rect x="1540" y="500" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="1548" y="508" width="30.9" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="1554" y="519.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">gov</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="1710.5" cy="515.5" r="5.5"/><path d="M1714.5 519.5l5 5"/></g>
+<text x="1635.0" y="545.0" text-anchor="middle" font-size="15" fill="#1f2633">OpenSearch</text>
+<text x="1635.0" y="563.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">DataHub search index</text>
+<rect x="1234" y="696" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3" stroke-dasharray="5 4"/>
+<rect x="1242" y="704" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="1248" y="715.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">orch</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1398" y="706" width="16" height="13" rx="2"/><path d="M1398 710h16"/><path d="M1403 722h6"/></g>
+<text x="1329.0" y="741.0" text-anchor="middle" font-size="15" fill="#1f2633">Airflow webserver</text>
+<text x="1329.0" y="759.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">UI :8082</text>
+<rect x="1540" y="696" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="1548" y="704" width="49.8" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="1554" y="715.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">stream</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1704 709c4 0 4 4 8 4s4-4 8-4"/><path d="M1704 714c4 0 4 4 8 4s4-4 8-4"/></g>
+<text x="1635.0" y="734.0" text-anchor="middle" font-size="15" fill="#1f2633">Flink 1.20.5</text>
+<text x="1635.0" y="752.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">jobmanager + taskmanager</text>
+<text x="1635.0" y="766.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">scan_windows.py</text>
+<rect x="1846" y="696" width="190" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="1854" y="704" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="1860" y="715.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">core</text>
+<rect x="2010" y="706.0" width="16" height="3.4" rx="1.2" fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="2010" y="711.2" width="16" height="3.4" rx="1.2" fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="2010" y="716.4" width="16" height="3.4" rx="1.2" fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1941.0" y="734.0" text-anchor="middle" font-size="15" fill="#1f2633">Kafka 3.9</text>
+<text x="1941.0" y="752.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">parcel-scans</text>
+<text x="1941.0" y="766.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">hub-delivery-5m, scans-late</text>
+<rect x="2124" y="150" width="236" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="2132" y="158" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="2138" y="169.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">user</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="2342" cy="163.5" r="3.6"/><path d="M2335 175c0-4 3.1-6.5 7-6.5s7 2.5 7 6.5"/></g>
+<text x="2242.0" y="195.0" text-anchor="middle" font-size="15" fill="#1f2633">Analyst</text>
+<text x="2242.0" y="213.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">DBeaver, browser</text>
+<rect x="2124" y="330" width="236" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="2132" y="338" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="2138" y="349.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">host</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2334" y="340" width="16" height="14" rx="2"/><path d="M2337.5 345l3 2-3 2M2342 350h4"/></g>
+<text x="2242.0" y="368.0" text-anchor="middle" font-size="15" fill="#1f2633">DataHub ingestion</text>
+<text x="2242.0" y="386.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">datahub ingest</text>
+<text x="2242.0" y="400.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">3 recipes</text>
+<rect x="2124" y="696" width="236" height="86" rx="7" fill="#ffffff" stroke="#ccd1da" stroke-width="1.3"/>
+<rect x="2132" y="704" width="37.2" height="16" rx="3" fill="#ffffff" stroke="#ccd1da"/><text x="2138" y="715.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" letter-spacing="0.6" fill="#465165">host</text>
+<g fill="none" stroke="#465165" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2334" y="706" width="16" height="14" rx="2"/><path d="M2337.5 711l3 2-3 2M2342 716h4"/></g>
+<text x="2242.0" y="734.0" text-anchor="middle" font-size="15" fill="#1f2633">Scan producer</text>
+<text x="2242.0" y="752.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">scan_producer.py</text>
+<text x="2242.0" y="766.0" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#465165">stream_windows.py</text>
+<path d="M138 500 L138 187 L300 187" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M138 500 L138 187 L300 187" fill="none" stroke="#9c36b5" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-D)"/>
+<path d="M138 586 L138 887 L300 887" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M138 586 L138 887 L300 887" fill="none" stroke="#9c36b5" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-D)"/>
+<path d="M622 543.0 L506 543.0" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M622 543.0 L506 543.0" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M376 222 L376 500" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M376 222 L376 500" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M456 500 L456 222" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M456 500 L456 222" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M356 852 L356 586" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M356 852 L356 586" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M416 586 L416 852" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M416 586 L416 852" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M717.0 586 L717.0 696" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M717.0 586 L717.0 696" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M717.0 500 L717.0 390" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M717.0 500 L717.0 390" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M1023.0 852 L1023.0 782" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1023.0 852 L1023.0 782" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M812 739.0 L928 739.0" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M812 739.0 L928 739.0" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M968 696 L968 252 L2200 252 L2200 236" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M968 696 L968 252 L2200 252 L2200 236" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M2036 200 L2124 200" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M2036 200 L2124 200" fill="none" stroke="#1971c2" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-B)"/>
+<path d="M2124 722 L2036 722" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M2124 722 L2036 722" fill="none" stroke="#e8590c" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-S)"/>
+<path d="M2036 758 L2124 758" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M2036 758 L2124 758" fill="none" stroke="#e8590c" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-S)"/>
+<path d="M2242 782 L2242 818 L1635.0 818 L1635.0 782" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M2242 782 L2242 818 L1635.0 818 L1635.0 782" fill="none" stroke="#e8590c" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-S)"/>
+<path d="M1846 722 L1730 722" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1846 722 L1730 722" fill="none" stroke="#e8590c" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-S)"/>
+<path d="M1730 758 L1846 758" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1730 758 L1846 758" fill="none" stroke="#e8590c" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-S)"/>
+<path d="M2036 214 L2088 214 L2088 350 L2124 350" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M2036 214 L2088 214 L2088 350 L2124 350" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M1078 696 L1078 640 L2104 640 L2104 400 L2124 400" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1078 696 L1078 640 L2104 640 L2104 400 L2124 400" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M1941.0 696 L1941.0 660 L2396 660 L2396 373 L2360 373" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1941.0 696 L1941.0 660 L2396 660 L2396 373 L2360 373" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M2124 374 L1470 374 L1470 520 L1424 520" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M2124 374 L1470 374 L1470 520 L1424 520" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M904 852 L904 566 L812 566" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M904 852 L904 566 L812 566" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M812 524 L1234 524" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M812 524 L1234 524" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M1424 562 L1540 562" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1424 562 L1540 562" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M1329.0 500 L1329.0 390" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1329.0 500 L1329.0 390" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<path d="M1329.0 304 L1329.0 272 L2300 272 L2300 236" fill="none" stroke="#eceff4" stroke-width="7" stroke-linejoin="round"/>
+<path d="M1329.0 304 L1329.0 272 L2300 272 L2300 236" fill="none" stroke="#2f9e44" stroke-width="1.7" stroke-linejoin="round" marker-end="url(#head-G)"/>
+<circle cx="138" cy="300" r="11.5" fill="#ffffff" stroke="#9c36b5" stroke-width="1.6"/><text x="138" y="303.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#9c36b5">D1</text>
+<text x="154" y="297" text-anchor="start" font-size="11.5" fill="#465165">orders, couriers,</text>
+<text x="154" y="311" text-anchor="start" font-size="11.5" fill="#465165">hubs (COPY, oms)</text>
+<circle cx="138" cy="720" r="11.5" fill="#ffffff" stroke="#9c36b5" stroke-width="1.6"/><text x="138" y="723.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#9c36b5">D2</text>
+<text x="154" y="717" text-anchor="start" font-size="11.5" fill="#465165">pings, scans</text>
+<text x="154" y="731" text-anchor="start" font-size="11.5" fill="#465165">(Parquet, app-exports)</text>
+<circle cx="564.0" cy="543.0" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="564.0" y="546.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B1</text>
+<text x="564.0" y="511.0" text-anchor="middle" font-size="11.5" fill="#465165">spark-submit</text>
+<text x="564.0" y="525.0" text-anchor="middle" font-size="11.5" fill="#465165">DP1 to DP3</text>
+<circle cx="376" cy="262" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="376" y="265.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B2</text>
+<text x="360" y="259" text-anchor="end" font-size="11.5" fill="#465165">changed oms rows</text>
+<text x="360" y="273" text-anchor="end" font-size="11.5" fill="#465165">(JDBC, DP1)</text>
+<circle cx="456" cy="420" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="456" y="423.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B6</text>
+<text x="472" y="417" text-anchor="start" font-size="11.5" fill="#465165">star schema</text>
+<text x="472" y="431" text-anchor="start" font-size="11.5" fill="#465165">(JDBC to dwh, DP2)</text>
+<circle cx="356" cy="660" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="356" y="663.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B3</text>
+<text x="340" y="657" text-anchor="end" font-size="11.5" fill="#465165">new export dates</text>
+<text x="340" y="671" text-anchor="end" font-size="11.5" fill="#465165">(DP1)</text>
+<circle cx="416" cy="790" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="416" y="793.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B4</text>
+<text x="432" y="787" text-anchor="start" font-size="11.5" fill="#465165">Delta bronze, silver,</text>
+<text x="432" y="801" text-anchor="start" font-size="11.5" fill="#465165">gold, feat_ (DP1 to DP3)</text>
+<circle cx="717.0" cy="641" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="717.0" y="644.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B5</text>
+<text x="733.0" y="638" text-anchor="start" font-size="11.5" fill="#465165">table definitions</text>
+<text x="733.0" y="652" text-anchor="start" font-size="11.5" fill="#465165">(from the drivers)</text>
+<circle cx="717.0" cy="445" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="717.0" y="448.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B7</text>
+<text x="733.0" y="449" text-anchor="start" font-size="11.5" fill="#465165">event logs</text>
+<circle cx="1023.0" cy="818" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="1023.0" y="821.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B8</text>
+<text x="1039.0" y="822" text-anchor="start" font-size="11.5" fill="#465165">Delta files</text>
+<circle cx="852" cy="739.0" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="852" y="742.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B9</text>
+<text x="852" y="707.0" text-anchor="middle" font-size="11.5" fill="#465165">table</text>
+<text x="852" y="721.0" text-anchor="middle" font-size="11.5" fill="#465165">definitions</text>
+<circle cx="968" cy="440" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="968" y="443.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B10</text>
+<text x="984" y="444" text-anchor="start" font-size="11.5" fill="#465165">SQL results (lakehouse)</text>
+<circle cx="2080" cy="200" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="2080" y="203.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B11</text>
+<text x="2080" y="168" text-anchor="middle" font-size="11.5" fill="#465165">SQL results</text>
+<text x="2080" y="182" text-anchor="middle" font-size="11.5" fill="#465165">(dwh)</text>
+<circle cx="2080.0" cy="722" r="11.5" fill="#ffffff" stroke="#e8590c" stroke-width="1.6"/><text x="2080.0" y="725.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#e8590c">S1</text>
+<text x="2080.0" y="690" text-anchor="middle" font-size="11.5" fill="#465165">scan events</text>
+<text x="2080.0" y="704" text-anchor="middle" font-size="11.5" fill="#465165">(event time)</text>
+<circle cx="2080.0" cy="758" r="11.5" fill="#ffffff" stroke="#e8590c" stroke-width="1.6"/><text x="2080.0" y="761.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#e8590c">S5</text>
+<text x="2080.0" y="785" text-anchor="middle" font-size="11.5" fill="#465165">window</text>
+<text x="2080.0" y="799" text-anchor="middle" font-size="11.5" fill="#465165">results</text>
+<circle cx="1960" cy="818" r="11.5" fill="#ffffff" stroke="#e8590c" stroke-width="1.6"/><text x="1960" y="821.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#e8590c">S2</text>
+<text x="1976" y="815" text-anchor="start" font-size="11.5" fill="#465165">flink run</text>
+<text x="1976" y="829" text-anchor="start" font-size="11.5" fill="#465165">(job submit)</text>
+<circle cx="1788.0" cy="722" r="11.5" fill="#ffffff" stroke="#e8590c" stroke-width="1.6"/><text x="1788.0" y="725.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#e8590c">S3</text>
+<text x="1788.0" y="704" text-anchor="middle" font-size="11.5" fill="#465165">parcel-scans</text>
+<circle cx="1788.0" cy="758" r="11.5" fill="#ffffff" stroke="#e8590c" stroke-width="1.6"/><text x="1788.0" y="761.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#e8590c">S4</text>
+<text x="1788.0" y="785" text-anchor="middle" font-size="11.5" fill="#465165">5-min hub counts,</text>
+<text x="1788.0" y="799" text-anchor="middle" font-size="11.5" fill="#465165">late scans</text>
+<circle cx="2088" cy="300" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="2088" y="303.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G1</text>
+<text x="2072" y="304" text-anchor="end" font-size="11.5" fill="#465165">oms, dwh schemas</text>
+<circle cx="1300" cy="640" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="1300" y="643.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G2</text>
+<text x="1300" y="622" text-anchor="middle" font-size="11.5" fill="#465165">lakehouse schemas</text>
+<circle cx="2396" cy="560" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="2396" y="563.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G3</text>
+<text x="2380" y="564" text-anchor="end" font-size="11.5" fill="#465165">topic schemas</text>
+<circle cx="1700" cy="374" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="1700" y="377.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G4</text>
+<text x="1700" y="356" text-anchor="middle" font-size="11.5" fill="#465165">metadata</text>
+<circle cx="904" cy="817" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="904" y="820.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G5</text>
+<text x="888" y="814" text-anchor="end" font-size="11.5" fill="#465165">validation results</text>
+<text x="888" y="828" text-anchor="end" font-size="11.5" fill="#465165">(_validation)</text>
+<circle cx="1130" cy="524" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="1130" y="527.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G6</text>
+<text x="1130" y="492" text-anchor="middle" font-size="11.5" fill="#465165">lineage, assertions</text>
+<text x="1130" y="506" text-anchor="middle" font-size="11.5" fill="#465165">(DataHub plugin)</text>
+<circle cx="1482.0" cy="562" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="1482.0" y="565.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G7</text>
+<text x="1482.0" y="589" text-anchor="middle" font-size="11.5" fill="#465165">search</text>
+<text x="1482.0" y="603" text-anchor="middle" font-size="11.5" fill="#465165">index</text>
+<circle cx="1329.0" cy="445" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="1329.0" y="448.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G8</text>
+<text x="1345.0" y="442" text-anchor="start" font-size="11.5" fill="#465165">catalog,</text>
+<text x="1345.0" y="456" text-anchor="start" font-size="11.5" fill="#465165">lineage, quality</text>
+<circle cx="1700" cy="272" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="1700" y="275.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G9</text>
+<text x="1700" y="299" text-anchor="middle" font-size="11.5" fill="#465165">DataHub UI</text>
+<text x="32" y="990" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" letter-spacing="1.6" font-weight="600" fill="#465165">FLOWS</text>
+<path d="M32 1024h46" stroke="#9c36b5" stroke-width="1.7" marker-end="url(#head-D)"/><circle cx="50" cy="1024" r="11.5" fill="#ffffff" stroke="#9c36b5" stroke-width="1.6"/><text x="50" y="1027.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#9c36b5">D</text><text x="94" y="1029" font-size="14" fill="#1f2633">Data generation</text><text x="230.27272727272725" y="1029" font-size="11.5" fill="#8790a2">developer, once per scale: the two sources</text>
+<path d="M672 1024h46" stroke="#1971c2" stroke-width="1.7" marker-end="url(#head-B)"/><circle cx="690" cy="1024" r="11.5" fill="#ffffff" stroke="#1971c2" stroke-width="1.6"/><text x="690" y="1027.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#1971c2">B</text><text x="734" y="1029" font-size="14" fill="#1f2633">Batch pipelines</text><text x="870.2727272727273" y="1029" font-size="11.5" fill="#8790a2">Airflow, daily: DP1 triggers DP2, DP2 triggers DP3</text>
+<path d="M32 1058h46" stroke="#e8590c" stroke-width="1.7" marker-end="url(#head-S)"/><circle cx="50" cy="1058" r="11.5" fill="#ffffff" stroke="#e8590c" stroke-width="1.6"/><text x="50" y="1061.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#e8590c">S</text><text x="94" y="1063" font-size="14" fill="#1f2633">Streaming</text><text x="182.16363636363636" y="1063" font-size="11.5" fill="#8790a2">replay of parcel scans: Kafka → Flink windows</text>
+<path d="M672 1058h46" stroke="#2f9e44" stroke-width="1.7" marker-end="url(#head-G)"/><circle cx="690" cy="1058" r="11.5" fill="#ffffff" stroke="#2f9e44" stroke-width="1.6"/><text x="690" y="1061.6" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#2f9e44">G</text><text x="734" y="1063" font-size="14" fill="#1f2633">Governance</text><text x="830.1818181818182" y="1063" font-size="11.5" fill="#8790a2">DataHub: schemas, lineage, validation results</text>
+<text x="1320" y="1020" font-size="11.5" fill="#465165">An arrow carries the data named on it, from the unit that sends it to the unit that receives it.</text>
+<text x="1320" y="1037" font-size="11.5" fill="#465165">B1 and S2 carry no data: they point from the caller to the unit it calls.</text>
+<text x="1320" y="1054" font-size="11.5" fill="#465165">The dashed box is a support unit whose arrows are left out: the Airflow webserver, which reads</text>
+<text x="1320" y="1071" font-size="11.5" fill="#465165">the airflow database and shows the DAG runs. Also left out: each service's own database in</text>
+<text x="1320" y="1088" font-size="11.5" fill="#465165">Postgres (Airflow, Hive Metastore, DataHub), DataHub's internal Kafka topics, and the scan</text>
+<text x="1320" y="1105" font-size="11.5" fill="#465165">producer's reads of a week's export scans and their orders, from which it builds the events.</text>
+<text x="1320" y="1122" font-size="11.5" fill="#465165">Spark and Flink are each two containers that deploy together (master and worker, jobmanager</text>
+<text x="1320" y="1139" font-size="11.5" fill="#465165">and taskmanager).</text>
+</svg>

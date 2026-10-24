@@ -1,0 +1,20 @@
+# Flink 1.20.5 with PyFlink and the Kafka connector, built the simple way: one stage that compiles
+# PyFlink and keeps the compilers. Kept as the size baseline for the multi-stage Dockerfile; see
+# docs/environment.md (Built images: naive against multi-stage, and PyFlink on arm64).
+#   apache-flink 1.20.5               PyFlink; PyPI has no arm64 wheel, so pip builds it from source
+#   libpython3.10                     the shared Python library that thread mode (pemja) loads
+#   flink-sql-connector-kafka 3.4.0   KafkaSource and KafkaSink for Flink 1.20
+#   flink-python in lib/              in thread mode every job loads pemja's native library; from a
+#                                     job's own classloader the second job on a TaskManager fails
+#                                     (NoSuchFieldException: loadedLibraryNames on Java 17), so pemja
+#                                     comes from lib/, parent-first (classloader setting in compose)
+FROM flink:1.20.5-scala_2.12-java17
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-dev python3-pip build-essential libpython3.10 \
+    && ln -s /usr/bin/python3 /usr/bin/python \
+    && pip3 install --no-cache-dir "apache-flink==1.20.5" \
+    && rm -rf /var/lib/apt/lists/*
+ADD https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.4.0-1.20/flink-sql-connector-kafka-3.4.0-1.20.jar /opt/flink/lib/
+RUN chmod 644 /opt/flink/lib/flink-sql-connector-kafka-3.4.0-1.20.jar \
+    && cp /opt/flink/opt/flink-python-1.20.5.jar /opt/flink/lib/

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "From the order system and the courier app to the late-delivery feature tables, daily and in real time",
+    "subtitle": "LastLeg Logistics data platform, EDAI-1: the steps, the zones they write and the services around them",
+    "description": "Each batch step writes one zone of the lakehouse, and the next step reads it from there. The stream counts the deliveries per hub in 5-minute windows. Airflow runs the batch steps, DataHub records their lineage and validation results, and the storage servers hold every zone.",
+    "visual_preset": "classic",
+    "theme": "light",
+    "animation": "none"
+  },
+  "boundaries": [
+    { "id": "batch", "label": "Batch: Airflow, daily", "role": "cluster", "components": ["sources", "dp1", "silver-step", "gold-step", "warehouse-step", "dp3", "trino", "bronze", "silver", "gold", "features", "metastore", "h3", "dwh"] },
+    { "id": "stream", "label": "Stream: replay of the parcel scans", "role": "cluster", "components": ["producer", "scans-topic", "flink", "out-topics"] }
+  ],
+  "components": [
+    { "id": "sources", "label": "Order system, app exports", "description": "Postgres oms; s3://app-exports", "role": "external", "tags": ["source"], "layer": 0 },
+    { "id": "dp1", "label": "Spark ingest", "description": "rows changed since the watermark, new export dates", "role": "worker", "tags": ["01 DP1"], "layer": 1 },
+    { "id": "bronze", "label": "bronze", "description": "raw_* Delta tables", "role": "storage", "tags": ["lakehouse"], "layer": 2 },
+    { "id": "silver-step", "label": "Spark silver", "description": "merge, dedup, v1 and v2 pings unified, compaction", "role": "worker", "tags": ["02 DP2"], "layer": 3 },
+    { "id": "silver", "label": "silver", "description": "stg_* Delta tables", "role": "storage", "tags": ["lakehouse"], "layer": 4 },
+    { "id": "gold-step", "label": "Spark gold", "description": "SCD2 dim_courier, facts, NULL-isolation join", "role": "worker", "tags": ["03 DP2"], "layer": 5 },
+    { "id": "h3", "label": "H3 zones with Apache Sedona", "description": "resolution 7 cells: dim_zone, drop_zone_id", "role": "worker", "tags": ["novel 1"], "layer": 5 },
+    { "id": "gold", "label": "gold", "description": "dim_* and fact_* Delta tables", "role": "storage", "tags": ["lakehouse"], "layer": 6 },
+    { "id": "warehouse-step", "label": "Warehouse load", "description": "star schema swapped in one transaction", "role": "worker", "tags": ["04 DP2"], "layer": 7 },
+    { "id": "dwh", "label": "dwh", "description": "Postgres star schema with B-tree, partial and BRIN indexes", "role": "database", "tags": ["warehouse"], "layer": 8 },
+    { "id": "dp3", "label": "Incremental features", "description": "only what the facts' Change Data Feed changed", "role": "worker", "tags": ["05 DP3 novel 2"], "layer": 7 },
+    { "id": "features", "label": "features", "description": "feat_* Delta tables with event_timestamp, created", "role": "storage", "tags": ["lakehouse"], "layer": 8 },
+    { "id": "trino", "label": "Trino", "description": "SQL on every zone", "role": "backend", "tags": ["06 SQL"], "layer": 9 },
+    { "id": "metastore", "label": "Hive Metastore", "description": "the tables of every zone", "role": "database", "tags": ["catalog"], "layer": 9 },
+    { "id": "producer", "label": "Scan producer", "description": "a week of scans, 8% late, 1.5% retries", "role": "worker", "tags": ["host"], "layer": 0 },
+    { "id": "scans-topic", "label": "Kafka parcel-scans", "description": "record time = event time", "role": "queue", "tags": ["source topic"], "layer": 1 },
+    { "id": "flink", "label": "Flink windows", "description": "5-minute windows per hub, watermark, lateness, dedup", "role": "worker", "tags": ["07 STREAM"], "layer": 2 },
+    { "id": "out-topics", "label": "Kafka hub-delivery-5m, scans-late", "description": "window counts and late scans", "role": "queue", "tags": ["topics"], "layer": 3 },
+    { "id": "airflow", "label": "Airflow", "description": "DP1, DP2, DP3", "role": "backend", "tags": ["orchestration"], "layer": 10 },
+    { "id": "datahub", "label": "DataHub", "description": "lineage and assertions", "role": "backend", "tags": ["governance"], "layer": 10 },
+    { "id": "storage", "label": "Storage servers", "description": "SeaweedFS, Postgres, Kafka", "role": "storage", "tags": ["storage"], "layer": 10 }
+  ],
+  "connections": [
+    { "id": "o1", "from": "sources", "to": "dp1", "label": "changed rows, | export dates" },
+    { "id": "o2", "from": "dp1", "to": "bronze", "label": "writes" },
+    { "id": "o3", "from": "bronze", "to": "silver-step", "label": "reads" },
+    { "id": "o4", "from": "silver-step", "to": "silver", "label": "writes" },
+    { "id": "o5", "from": "silver", "to": "gold-step", "label": "reads" },
+    { "id": "o6", "from": "gold-step", "to": "gold", "label": "writes" },
+    { "id": "o7", "from": "h3", "to": "gold", "label": "dim_zone, | drop_zone_id" },
+    { "id": "o8", "from": "gold", "to": "dp3", "label": "change feed" },
+    { "id": "o9", "from": "dp3", "to": "features", "label": "merges" },
+    { "id": "o10", "from": "gold", "to": "warehouse-step", "label": "reads" },
+    { "id": "o11", "from": "warehouse-step", "to": "dwh", "label": "loads" },
+    { "id": "o12", "from": "metastore", "to": "trino", "label": "tables" },
+    { "id": "o13", "from": "producer", "to": "scans-topic", "label": "scan events" },
+    { "id": "o14", "from": "scans-topic", "to": "flink", "label": "scans" },
+    { "id": "o15", "from": "flink", "to": "out-topics", "label": "counts, | late scans" }
+  ]
+}

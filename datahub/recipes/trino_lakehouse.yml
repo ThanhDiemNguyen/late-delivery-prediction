@@ -1,0 +1,18 @@
+# The lakehouse's Delta tables (bronze, silver, gold), read through Trino's delta catalog.
+source:
+  type: trino
+  config:
+    host_port: "${TRINO_HOST_PORT:-localhost:8090}"
+    database: delta
+    username: datahub
+    schema_pattern:
+      allow: ["^bronze$", "^silver$", "^gold$"]
+    table_pattern:
+      deny: [".*\\.dp3_progress$"]
+    include_views: false
+    profiling:
+      enabled: false
+sink:
+  type: datahub-rest
+  config:
+    server: "${DATAHUB_GMS_URL:-http://localhost:8083}"

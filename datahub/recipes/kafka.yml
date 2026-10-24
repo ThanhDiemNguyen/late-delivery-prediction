@@ -1,0 +1,13 @@
+# The platform's Kafka topics (not DataHub's own event topics, which share the broker).
+source:
+  type: kafka
+  config:
+    connection:
+      bootstrap: "${KAFKA_BOOTSTRAP:-localhost:9092}"
+      schema_registry_url: "${DATAHUB_GMS_URL:-http://localhost:8083}/schema-registry/api/"
+    topic_patterns:
+      allow: ["^parcel-scans$", "^parcel-scans-replay$", "^hub-delivery-5m$", "^scans-late$"]
+sink:
+  type: datahub-rest
+  config:
+    server: "${DATAHUB_GMS_URL:-http://localhost:8083}"

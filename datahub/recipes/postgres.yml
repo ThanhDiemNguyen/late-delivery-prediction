@@ -1,0 +1,18 @@
+# The order system (oms, a source) and the warehouse (dwh) in Postgres. Credentials from the environment.
+source:
+  type: postgres
+  config:
+    host_port: "${POSTGRES_HOST_PORT:-localhost:15432}"
+    username: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    database_pattern:
+      allow: ["^oms$", "^dwh$"]
+    schema_pattern:
+      allow: ["^public$"]
+    include_views: false
+    profiling:
+      enabled: false
+sink:
+  type: datahub-rest
+  config:
+    server: "${DATAHUB_GMS_URL:-http://localhost:8083}"
