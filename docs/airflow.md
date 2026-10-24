@@ -1,8 +1,8 @@
 # Airflow: orchestration of DP1 to DP3
 
 Airflow runs the three pipelines' Spark jobs (`jobs/`) in order, on a schedule, and records every
-run. This page covers the image, the services, where connections and variables come from, and the
-DAGs.
+run. This page covers the services, the image, where the connections and variables come from,
+and the DAGs (directed acyclic graphs).
 
 ## Services (profile `orch`)
 
@@ -20,13 +20,13 @@ docker compose --profile core --profile batch --profile orch up -d --wait
 
 ## The image (`infra/airflow/Dockerfile.naive`, then `Dockerfile`)
 
-The services now run `lastleg/airflow:2.10.5` from the multi-stage `infra/airflow/Dockerfile`:
-2.31 GB, on the slim Airflow image with only the providers the DAGs use
-([environment.md](environment.md#built-images-naive-against-multi-stage)). The rest of this section
-describes the first, naive build, kept as the size baseline.
+The services now run `lastleg/airflow:2.10.5` from the multi-stage `infra/airflow/Dockerfile`. This
+image is 2.31 GB. It is built on the slim Airflow image and has only the providers that the DAGs
+use ([environment.md](environment.md#built-images-naive-against-multi-stage)). The rest of this
+section describes the first, naive build, which stays as the size baseline.
 
 The naive image is built on `apache/airflow:2.10.5-python3.10` and is 3.23 GB. This first version is
-deliberately naive: everything is copied and installed in one image and nothing is removed. The
+deliberately naive: it copies and installs everything in one image and removes nothing. The
 multi-stage rewrite above replaced it.
 
 | Part | Why |
@@ -43,12 +43,14 @@ so the executors on `spark-worker` can connect back to the driver.
 
 ## Connections, variables and pool
 
-**Who sees the credentials.** Only `airflow-init` reads `.env` (`env_file`). `airflow/setup_airflow.py`
-stores the source credentials as Airflow connections, encrypted with `AIRFLOW_FERNET_KEY`, in the
-`airflow` database. The webserver and the scheduler get two values from Compose instead: the
-metadata database URL (`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`), which uses the same Postgres login,
-and the Fernet key. The DAG code holds no password: a DAG reads one through a connection id, for
-example `{{ conn.oms_postgres.password }}` in a templated field. Running the init again updates the
+**Who sees the credentials.** Only `airflow-init` reads `.env` (`env_file`). The script
+`airflow/setup_airflow.py` stores the source credentials as Airflow connections in the `airflow`
+database, encrypted with `AIRFLOW_FERNET_KEY`. The webserver and the scheduler get two values
+from Compose instead. One is the metadata database URL (`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`),
+which uses the same Postgres login. The other is the Fernet key.
+
+The DAG code holds no password. A DAG reads a password through a connection id, for example
+`{{ conn.oms_postgres.password }}` in a templated field. If the init runs again, it updates the
 same entries.
 
 | Connection | Type | Points to |
@@ -60,9 +62,9 @@ same entries.
 | `datahub_rest_default` | datahub-rest | `http://datahub-gms:8080`, where the DataHub plugin and `publish_assertions` send metadata |
 
 Every Spark task gets its hosts and logins from these connections, through templated `env_vars`
-in `airflow/dags/lakehouse_tasks.py`: `OMS_JDBC_URL` and the login from `oms_postgres`, the S3 keys
-from `lakehouse_s3`. The `warehouse` task writes to `dwh` with `DWH_JDBC_URL` and the login of
-`dwh_postgres`.
+in `airflow/dags/lakehouse_tasks.py`. The entry `OMS_JDBC_URL` and the login come from
+`oms_postgres`, and the S3 keys come from `lakehouse_s3`. The `warehouse` task writes to `dwh` with
+`DWH_JDBC_URL` and the login of `dwh_postgres`.
 
 | Variable | Value | Used by |
 |---|---|---|
@@ -71,9 +73,9 @@ from `lakehouse_s3`. The `warehouse` task writes to `dwh` with `DWH_JDBC_URL` an
 | `exports_bucket` | `app-exports` | every Spark task (`EXPORTS_BUCKET`); DP1 reads the export files from it |
 | `period_end` | `2024-11-30` | the three validate tasks (`--period-end`) |
 
-The start of the period, 2024-06-01, is not a variable: it is each DAG's `start_date`, which
-Airflow reads when it parses the DAG file, before any template is rendered. It is
-`PERIOD_START` in `lakehouse_tasks.py`.
+The start of the period, 2024-06-01, is not a variable. It is each DAG's `start_date`, and
+Airflow reads it when it parses the DAG file, before it renders any template. In
+`lakehouse_tasks.py`, it is `PERIOD_START`.
 
 **Pool.** `spark` has 1 slot, so only one Spark application runs at a time. The cluster has one
 4-core worker, and two drivers would starve each other.
@@ -94,9 +96,10 @@ default_pool  128    spark  1  one Spark application at a time (one 4-core worke
 
 ### Checks after the review fixes (2026-10-24)
 
-`period_start` was removed: nothing read it, and the DAGs' start date cannot come from a variable
-(above). The variables and connections the tasks use, and the values the `warehouse` task gets
-from them (`airflow tasks render`, with the logins and passwords left out):
+The variable `period_start` was removed because nothing read it, and the DAGs' start date cannot
+come from a variable (above). The output below shows the variables and connections that the tasks
+use. It also shows the values that the `warehouse` task gets from them (`airflow tasks render`,
+with the logins and passwords left out):
 
 ```text
 $ docker compose exec airflow-scheduler airflow variables list
@@ -116,8 +119,8 @@ The installed versions were checked inside the image:
   (from `SPARK_HOME`).
 
 The UI shows the same entries (Admin → Connections, Variables, Pools). The connection list has no
-login or password column, and the variables hold no secret. The variables page is from after the
-review fixes:
+login or password column, and the variables hold no secret. The screenshot of the variables page
+is from after the review fixes:
 
 ![Airflow connections](images/airflow/connections.png)
 
@@ -129,13 +132,13 @@ review fixes:
 
 The DAGs build their Spark tasks with one factory, `airflow/dags/lakehouse_tasks.py`:
 
-- **How it submits:** `SparkSubmitOperator` on connection `spark_lakehouse`, in pool `spark`, with
-  the job path from variable `jobs_dir`.
-- **Credentials, hosts and buckets:** they come from connections and variables in templated
+- It submits each job with `SparkSubmitOperator` on connection `spark_lakehouse`, in pool `spark`,
+  with the job path from variable `jobs_dir`.
+- The credentials, hosts and buckets come from connections and variables in templated
   `env_vars` (`{{ conn.oms_postgres.password }}`, `{{ conn.lakehouse_s3.password }}`,
   `{{ var.value.lakehouse_bucket }}`). A task can add or replace entries (`env=`), as the
   `warehouse` task does for `dwh_postgres`.
-- **Spark settings:** `spark.driver.host` is set to `airflow-scheduler`.
+- In the Spark settings, `spark.driver.host` is set to `airflow-scheduler`.
 
 The DAGs run from 2024-06-01 to 2024-12-01. The extra last day loads the parcels ordered on
 2024-11-30 and delivered after midnight: their order update and their scans belong to 2024-12-01.
@@ -156,13 +159,13 @@ validate_bronze  >>  publish_assertions (the suite's results to DataHub, trigger
 | `publish_assertions` | sends the suite's results to DataHub as assertions, whether the suite passed or failed | [datahub.md](datahub.md) |
 | `trigger_dp2` | starts `dp2_transform_validate` for the same day, only after `validate_bronze` passed | |
 
-`validate_bronze` fails the run when any expectation fails, so nothing after it runs on bad
-bronze. For a day after `period_end`, the DP1 suite skips the pings slice, which has no rows then
-(45 of its 73 expectations remain). The DP2 and DP3 suites skip their ping, activity, fact and
-hub-hour slices in the same way.
+If any expectation fails, `validate_bronze` fails the run, so no later task runs on bad bronze.
+For a day after `period_end`, the DP1 suite skips the pings slice, which has no rows then (45 of
+its 73 expectations remain). The DP2 and DP3 suites skip their ping, activity, fact and hub-hour
+slices in the same way.
 
-**Check on the dev slice (2026-10-23).** Bronze's rows from local 2024-11-29 on were deleted with a
-Delta `DELETE`, so the DAG had real work to do. (The deleted rows stay in the table's history, and
+**Check on the dev slice (2026-10-23).** A Delta `DELETE` removed bronze's rows from local
+2024-11-29 on, so the DAG had real work to do. (The deleted rows stay in the table's history, and
 the sources still hold them.) Then three runs were triggered:
 
 | Run | `ingest_bronze` | `validate_bronze` | Result |
@@ -171,9 +174,9 @@ the sources still hold them.) Then three runs were triggered:
 | 2024-11-30 | the next day (31 s) | 73 of 73 (34 s) | success |
 | 2024-12-01 | the 2,519 orders and 2,838 scans changed after midnight | first run: failed. 72 of 73, because there are no pings after the period. After the period-end rule: 45 of 45 | success after the fix |
 
-After the runs, bronze equals the sources again: 808,000 orders, 49,350,264 pings, 2,424,000
-scans, 200 couriers, 1,093 courier changes and 50,000 customers. The 5.7 MB of task logs contain
-neither the Postgres password nor the S3 secret key.
+After the runs, bronze equals the sources again. The counts are 808,000 orders, 49,350,264 pings,
+2,424,000 scans, 200 couriers, 1,093 courier changes and 50,000 customers. The 5.7 MB of task logs
+contain neither the Postgres password nor the S3 secret key.
 
 The grid holds DP1's six runs, all green. The graph shows the run for 2024-12-01:
 
@@ -205,8 +208,8 @@ validate_suite >> publish_assertions (the suite's results to DataHub, trigger ru
 | `trigger_dp3` | starts `dp3_features_validate` for the same day, only after both checks passed | |
 
 **Check on the dev slice (2026-10-23).** A run of `dp1_ingest_validate` for 2024-11-30 passed its
-three tasks and triggered `dp2_transform_validate` for the same day. All six DP2 tasks succeeded
-in 3.5 minutes:
+three tasks. Then it triggered `dp2_transform_validate` for the same day. All six DP2 tasks
+succeeded in 3.5 minutes:
 
 | Task | Time | Output |
 |---|---:|---|
@@ -218,9 +221,9 @@ in 3.5 minutes:
 | `validate_scd2` | 23 s | 8 invariants, 0 violations: 799 versions from 1,093 audit rows |
 
 The first try of the DP1 run failed at `trigger_dp2` ("Dag id dp2_transform_validate not found").
-The scheduler looks for new DAG files every 300 s by default, and the run started seconds after the
-file was added. `AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL` is now 30 s. After clearing the task,
-the run passed.
+By default, the scheduler looks for new DAG files every 300 s, and the run started seconds after
+the file was added. The setting `AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL` is now 30 s. After the
+task was cleared, the run passed.
 
 ![DP2 grid](images/airflow/dp2_transform_validate-grid.png)
 
@@ -248,12 +251,16 @@ validate_suite >> publish_assertions (the suite's results to DataHub, trigger ru
 
 **Why `checks_passed`.** Airflow sets a run's state from its last tasks. DP1 and DP2 end in a
 trigger task that runs only when their checks passed, so a failed check fails the run. DP3 has no
-next DAG, and `publish_assertions` succeeds even after a failed suite, so a failed suite used to
-leave the run green. `checks_passed` (an `EmptyOperator`) runs only when both checks passed: a
-failed check now marks it `upstream_failed`, and the run fails.
+next DAG, and its `publish_assertions` succeeds even after a failed suite. Thus a failed suite used
+to leave the run green. The task `checks_passed` runs only when both checks passed. Now a failed
+check marks it `upstream_failed`, and the run fails.
 
-`validate_incremental` compares every incrementally maintained feature table with a full
-recompute, so each run also checks novel idea 2 ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
+`checks_passed` is a one-line `BashOperator` that logs the result. An `EmptyOperator` gives the
+same run states. But the scheduler marks an `EmptyOperator` done without running it. The DataHub
+plugin then sends nothing for the task, and DataHub shows it only by its URN.
+
+The task `validate_incremental` compares every incrementally maintained feature table with a full
+recompute. So each run also checks novel idea 2 ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
 
 ![DP3 grid: the runs so far; checks_passed has run since the review fixes](images/airflow/dp3_features_validate-grid.png)
 
@@ -268,9 +275,9 @@ dp1_ingest_validate ──trigger_dp2──► dp2_transform_validate ──trig
 
 **Check on the dev slice (2026-10-23).** One trigger of `dp1_ingest_validate` for 2024-11-28 ran
 the whole chain green. DP1 finished after 66 s, DP2 (triggered by DP1) after 5.7 min, and DP3
-(triggered by DP2) after 8.1 min. The run for 2024-12-01, the day after the period, is green too:
-the DP3 suite passed 19 of 19, skipping only the hub-hour slice, which holds just that day's
-closing hour.
+(triggered by DP2) after 8.1 min. The run for 2024-12-01, the day after the period, is green too.
+In that run, the DP3 suite passed 19 of 19, and it skipped only the hub-hour slice. That slice holds
+just that day's closing hour.
 
 ### Run after the 100 GB work (2026-10-24)
 
@@ -289,7 +296,7 @@ docker compose exec airflow-scheduler airflow dags trigger dp2_transform_validat
 ```
 
 DP1 was not run. After the full-scale generation, `oms` and `app-exports` hold the 100 GB sources,
-while the lakehouse holds the slice. DP1 would copy every full-scale row changed after bronze's
+and the lakehouse holds the slice. DP1 would copy every full-scale row changed after bronze's
 watermark into the slice's bronze. DP2 reads bronze, so it ran on the slice as before.
 
 | DAG | Task | Time | Result |
@@ -306,11 +313,11 @@ watermark into the slice's bronze. DP2 reads bronze, so it ran on the slice as b
 | | `validate_incremental` | 81.2 s | 0 differences from a full recompute |
 | | `publish_assertions` | 1.1 s | 31 assertions sent to DataHub, 0 failed |
 
-DataHub's Trino recipe ran again afterwards. `fact_courier_activity_hourly` now shows
-`late_trip_min` in its schema, and 6 assertions instead of 5.
+After this run, DataHub's Trino recipe ran again. The table `fact_courier_activity_hourly` now
+shows `late_trip_min` in its schema, and 6 assertions instead of 5.
 
-**At full scale.** DP2 runs one day at a time. The pieces that grow with the data were measured
-at 100 GB ([spark_optimization.md](spark_optimization.md),
+**At full scale.** DP2 runs one day at a time. The steps whose cost grows with the data were
+measured at 100 GB ([spark_optimization.md](spark_optimization.md),
 [storage_optimization.md](storage_optimization.md)). The projection for one full-scale day assumes
 that the ping part of the cost grows with the rows:
 
@@ -320,15 +327,16 @@ that the ping part of the cost grows with the rows:
 | pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days; 294 s in the one-day trial ([spark_optimization.md](spark_optimization.md#the-choice-for-the-pipeline)) | 2 to 5 min: the join shuffles all 80.8 million orders every day, which is most of the one-day trial's time; the pings add about 6 s |
 | compaction and Z-order of the new pings | 443 s for 7 days | about 63 s |
 
-A daily DP2 at full scale therefore adds minutes, not hours, to the slice's 4.4 minutes. A full
-rebuild of 183 days would take hours: about 19 minutes for the join alone, and about 3 hours for
-compacting the whole history. That is what the 100 GB runs measured.
+So a daily DP2 at full scale adds minutes, not hours, to the slice's 4.4 minutes. A full rebuild
+of 183 days would take hours. The 100 GB runs measured about 19 minutes for the join alone, and
+about 3 hours to compact the whole history.
 
 ### Run after the review fixes (2026-10-24)
 
-The review fixes changed how the tasks get their settings (the buckets and both JDBC URLs from
-Airflow), DP2's lineage lists, and DP3's last task (`checks_passed`). DP2 was triggered for
-2024-11-30 (12:00 UTC), and it triggered DP3; DP1 was not run, for the reason above.
+The review fixes changed how the tasks get their settings: the buckets and both JDBC URLs now
+come from Airflow. They also changed DP2's lineage lists and DP3's last task (`checks_passed`).
+DP2 was triggered for 2024-11-30 (12:00 UTC), and it triggered DP3. DP1 was not run, for the
+reason above.
 
 ```bash
 docker compose exec airflow-scheduler airflow dags trigger dp2_transform_validate -e 2024-11-30T12:00:00+00:00 -r manual__review_fixes_2024-11-30
@@ -346,40 +354,41 @@ docker compose exec airflow-scheduler airflow dags trigger dp2_transform_validat
 | `dp3_features_validate` (green) | `features` | 27.1 s | the Change Data Feed listed 0 changed fact rows, so no feature row changed |
 | | `validate_suite` | 39.5 s | 31 of 31 |
 | | `validate_incremental` | 101.0 s | 0 differences from a full recompute: 33,836, 175,760 and 275,448 rows |
-| | `checks_passed` | 0 s | both checks passed |
+| | `checks_passed` | 0 s | both checks passed (an `EmptyOperator` in this run) |
 | | `publish_assertions` | 1.2 s | 31 assertions sent to DataHub, 0 failed |
 
-DataHub's lineage after this run is in [datahub.md](datahub.md#checks-after-the-lineage-fix-2026-10-24).
+After `checks_passed` became a `BashOperator`, DP3 ran green again for 2024-11-30 (18:00 UTC), and
+DataHub then showed the task by its name. DataHub's lineage after this run is in [datahub.md](datahub.md#checks-after-the-lineage-fix-2026-10-24).
 
 ### Failure drill: a corrupted batch blocks everything downstream
 
 The drill was run on 2026-10-23 against the order system.
 
 1. **Back up `oms`.** `pg_dump` (35 MB).
-2. **Insert a corrupted batch.** 100 orders copied from real 2024-12-01 orders, with new ids
-   (9000001 to 9000100), a traffic code the system never used (`"Gridlock "`), status `lost`, and
-   an `updated_ts` after bronze's watermark.
+2. **Insert a corrupted batch.** The batch holds 100 orders copied from real 2024-12-01 orders,
+   with new ids (9000001 to 9000100). They have a traffic code that the system never used
+   (`"Gridlock "`), status `lost`, and an `updated_ts` after bronze's watermark.
 3. **Rerun DP1 for 2024-12-01** (clearing its run).
    - `ingest_bronze` succeeded: `bronze.raw_orders: +100 rows`.
-   - `validate_bronze` **failed**: 43 of 45. `traffic` and `status` were out of their value sets
-     for 100 of 2,619 rows each (3.82%).
+   - `validate_bronze` failed: 43 of 45. The columns `traffic` and `status` were out of their value
+     sets for 100 of 2,619 rows each (3.82%).
    - `trigger_dp2` was `upstream_failed`.
-4. **Check downstream.** No new DP2 run started (still 1) and no DP3 run (still 0). Silver,
-   gold, the warehouse and the features never saw the batch.
+4. **Check downstream.** No new DP2 run started (still 1), and no DP3 run started (still 0).
+   Silver, gold, the warehouse and the features never saw the batch.
 5. **Repair.** The rows were deleted from `oms` and from bronze (Delta keeps the bad version in its
-   history). After clearing the DP1 run:
+   history). After the DP1 run was cleared:
    - DP1 passed and triggered DP2;
    - DP2 passed and triggered DP3;
    - DP3 passed: `features` read 0 changed fact rows, `validate_incremental` found 0 differences,
      and the suite passed 19 of 19.
 
 The failed `validate_bronze` still wrote its results
-(`s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json`) before the run stopped, and
+(`s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json`) before the run stopped. The task
 `publish_assertions` sends them to DataHub even when the suite fails
 ([datahub.md](datahub.md#data-validation-great-expectations-results-as-assertions)).
 
-`validate_bronze` for 2024-12-01 keeps every try. Try 1 failed before the period-end rule existed;
-tries 3 and 5 are the two drills, and each repair after them passed (tries 4 and 6):
+The task `validate_bronze` for 2024-12-01 keeps every try. Before the period-end rule existed,
+try 1 failed. Tries 3 and 5 are the two drills, and each repair after them passed (tries 4 and 6):
 
 ![validate_bronze tries for 2024-12-01](images/airflow/drill-validate-bronze-failed-try.png)
 
@@ -393,24 +402,24 @@ suite dp1 ds 2024-12-01: 43 of 45 expectations passed; results in s3a://lakehous
 
 ## Pitfalls
 
-- **A run after `end_date` checks nothing.** A run whose logical date is later than the DAG's
-  `end_date` gets no task instances and is marked success. The first drill run (2024-12-01
-  20:00 UTC, after the 00:00 `end_date`) did exactly that, so it was deleted and the drill reused
-  the 2024-12-01 run.
+- **A run after `end_date` checks nothing.** If a run's logical date is later than the DAG's
+  `end_date`, the run gets no task instances and Airflow marks it success. The first drill run
+  (2024-12-01 20:00 UTC, after the 00:00 `end_date`) did that. So it was deleted, and the
+  drill reused the 2024-12-01 run.
 - **The Change Data Feed of an unchanged fact.** Delta refuses a starting version past the table's
   latest one. DP3 failed once when only `fact_delivery` had a new version. It now reads an empty
   frame for a fact without one.
-- **Never print connections as URIs.** `airflow connections list` prints the password in plain
-  text unless the output is filtered, as above.
+- **Never print connections as URIs.** Unless the output is filtered, as above, the command
+  `airflow connections list` prints the password in plain text.
 - **New mounted folders after a merge.** Before a feature branch is merged, `git checkout develop`
-  deletes a folder that only the feature branch has (here `airflow/`), and the merge creates it
-  again as a new folder. Containers that mounted it then see an empty folder until they are
+  deletes a folder that only the feature branch has (here `airflow/`). The merge then creates it
+  again as a new folder. The containers that mounted it see an empty folder until they are
   recreated (`up -d --force-recreate`).
 - **A new module in the DAG folder needs a scheduler restart.** The DAG files import
-  `datahub_assertions.py`, which was added while the scheduler ran. Its DAG processor did not see
-  the new file: every DAG file failed with `ModuleNotFoundError: No module named
+  `datahub_assertions.py`, which was added while the scheduler ran. The scheduler's DAG processor
+  did not see the new file. Thus every DAG file failed with `ModuleNotFoundError: No module named
   'datahub_assertions'`, the three DAGs were deactivated, and a triggered run stayed `queued`.
-  `airflow tasks test` worked because it starts a fresh process. `docker compose restart
+  The command `airflow tasks test` worked because it starts a fresh process. A `docker compose restart
   airflow-scheduler airflow-webserver` fixed it.
 - **`--profile orch` alone is not enough,** like `batch`: Airflow needs Postgres from `core` and
   the Spark cluster from `batch`.

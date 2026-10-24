@@ -1,9 +1,9 @@
 # Late-delivery prediction: the LastLeg Logistics data platform
 
-The EDAI-1 coursework data platform for **LastLeg Logistics**, a fictional last-mile parcel carrier
-in the Los Angeles area. The platform generates the company's source data, moves it through
-bronze, silver and gold lakehouse zones, and builds the feature tables that a model will use to
-predict late deliveries. The model itself is trained in EDAI-2.
+This repository is the EDAI-1 coursework data platform for LastLeg Logistics, a fictional
+last-mile parcel carrier in the Los Angeles area. The platform generates the company's source data
+and moves it through bronze, silver and gold lakehouse zones. Then it builds the feature tables
+that a model will use to predict late deliveries. The model itself is trained in EDAI-2.
 
 All data in this repository is synthetic, and the company is fictional.
 
@@ -23,8 +23,9 @@ LastLeg Logistics delivers parcels from about 40 hubs across Los Angeles.
   that moment the courier, vehicle, traffic, weather and hub load are known, and the dispatcher can
   still act.
 - **Label:** a delivery is late when `delivered_ts > promised_ts`.
-- **Promised time:** `promised_ts = order_ts + SLA`. The SLA is set when the customer orders, from
-  the area type plus 3 minutes per km of distance from the hub to the drop point.
+- **Promised time:** `promised_ts = order_ts + SLA`. The SLA (service-level agreement) is set when
+  the customer orders. It comes from the area type plus 3 minutes per km of distance from the hub
+  to the drop point.
 - **Seed data:** the [Amazon Delivery Dataset](https://www.kaggle.com/datasets/sujalsuthar/amazon-delivery-dataset)
   on Kaggle (MIT license, 43,739 rows). It only sets the shapes of the generated data, such as how
   traffic and weather change delivery time. Every row in the platform is generated.
@@ -54,10 +55,11 @@ has its own colour and its own numbers, and two arrows cross only where the line
 The dashed boxes are support units whose arrows are left out: the Airflow webserver (it reads the
 `airflow` database) and OpenSearch (DataHub's search index).
 
-Both pictures are drawn by [`docs/diagrams/draw.py`](docs/diagrams/draw.py) (stdlib Python; PNG
-through headless Chrome) from two sources each: the topology in [`system.json`](docs/diagrams/system.json)
-and [`overview.json`](docs/diagrams/overview.json), in the typed architecture IR of the ak-diagram
-tool, and the coordinates in [`system_layout.py`](docs/diagrams/system_layout.py) and
+The script [`docs/diagrams/draw.py`](docs/diagrams/draw.py) draws both pictures (stdlib Python;
+PNG through headless Chrome). It reads two sources for each picture. The topology is in
+[`system.json`](docs/diagrams/system.json) and [`overview.json`](docs/diagrams/overview.json), in
+the typed architecture IR (intermediate representation) of the ak-diagram tool. The coordinates
+are in [`system_layout.py`](docs/diagrams/system_layout.py) and
 [`overview_layout.py`](docs/diagrams/overview_layout.py). The script refuses a layout in which an
 arrow crosses a box or a label overlaps a box, a line or another label.
 
@@ -78,7 +80,7 @@ arrow crosses a box or a label overlaps a box, a line or another label.
 | `stream` | Flink 1.20.5 jobmanager and taskmanager (PyFlink) | [streaming.md](docs/streaming.md) |
 | on the Mac | the data generator, the scan producer, the DataHub ingestion | [data_generator.md](docs/data_generator.md) |
 
-Start the platform with `cp .env.example .env` (then change the passwords) and
+To start the platform, run `cp .env.example .env` and change the passwords. Then run
 `docker compose --profile core --profile batch --profile query --profile orch --profile gov --profile stream up -d --wait`.
 Each profile can also start on its own, on top of `core`.
 
@@ -119,7 +121,7 @@ Each profile can also start on its own, on top of `core`.
 
 - An Apple Silicon Mac. Every image runs as linux/arm64 ([image inventory](docs/environment.md#image-inventory)).
 - Docker Desktop with 16 GB memory, 8 CPUs, 2 GB swap and an 800 GB disk limit. Its disk image is
-  on an external SSD; run `scripts/safe-shutdown.sh` before unplugging it
+  on an external SSD. Before you unplug the SSD, run `scripts/safe-shutdown.sh`
   ([procedure](docs/environment.md#start-stop-and-unplug-safely)).
 - [uv](https://docs.astral.sh/uv/) for Python. `uv sync` installs Python 3.10 and the
   dependencies, `uv run pytest` runs the tests, and `uvx ruff check .` runs the linter.
