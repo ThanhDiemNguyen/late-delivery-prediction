@@ -1,0 +1,23 @@
+# Airflow 2.10.5 (Python 3.10) with a Spark client identical to the cluster's, built the simple way:
+# everything copied and installed in one image, nothing removed. A multi-stage rewrite comes later.
+#   Spark client        the cluster image's Java 17 and /opt/spark (every lakehouse jar), so the drivers
+#                       Airflow starts (client mode) match the executors exactly
+#   /opt/driver-python  the Spark drivers' Python, a virtual environment with Great Expectations 0.18,
+#                       Sedona, h3 and delta-spark: GE and Sedona pin versions that clash with Airflow's
+#   providers           Spark provider (spark-submit only, no pyspark) and the DataHub listener plugin
+FROM apache/airflow:2.10.5-python3.10
+
+USER root
+COPY --from=lastleg/spark:3.5.9-naive /opt/java/openjdk /opt/java/openjdk
+COPY --from=lastleg/spark:3.5.9-naive /opt/spark /opt/spark
+ENV JAVA_HOME=/opt/java/openjdk \
+    SPARK_HOME=/opt/spark \
+    PATH=/opt/spark/bin:/opt/java/openjdk/bin:$PATH
+RUN mkdir -p /opt/driver-python && chown airflow:0 /opt/driver-python && chmod g+rwx /opt/driver-python
+
+USER airflow
+RUN python -m venv /opt/driver-python \
+    && /opt/driver-python/bin/pip install --no-cache-dir great_expectations==0.18.19 apache-sedona==1.9.0 h3==4.5.0 \
+    && /opt/driver-python/bin/pip install --no-cache-dir --no-deps delta-spark==3.3.3 importlib_metadata==8.5.0 zipp==3.21.0
+RUN pip install --no-cache-dir "apache-airflow==2.10.5" "acryl-datahub-airflow-plugin==1.5.0.17" \
+    && pip install --no-cache-dir --no-deps "apache-airflow-providers-apache-spark==5.0.0"

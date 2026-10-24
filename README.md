@@ -34,7 +34,7 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 ## Architecture
 
 The full deployment diagram is added once all the services exist. The deployable units built so
-far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch` and `query` profiles:
+far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch`, `query` and `orch` profiles:
 
 | Unit | Role |
 |---|---|
@@ -44,6 +44,7 @@ far are in the `core` Compose profile ([details](docs/core_services.md)) and the
 | Hive Metastore | catalog of the lakehouse tables (profiles `batch` and `query`, [details](docs/lakehouse.md)) |
 | Spark master, worker, history server | builds the Delta tables in bucket `lakehouse` (profile `batch`) |
 | Trino | SQL over the Delta tables for DBeaver and DataHub (profile `query`) |
+| Airflow webserver, scheduler | runs DP1 to DP3 (profile `orch`, [details](docs/airflow.md)) |
 
 Start them with `cp .env.example .env` (then change the passwords) and
 `docker compose --profile core --profile batch up -d --wait`.
@@ -58,10 +59,12 @@ Start them with `cp .env.example .env` (then change the passwords) and
 │   └── sql/             DDL of the oms tables, applied by the generator
 ├── seed/                the Kaggle seed file (gzipped) and its MIT license
 ├── tests/               pytest checks, run with: uv run pytest
+├── airflow/            Airflow DAGs and the init script for connections, variables and pool
 ├── jobs/                Spark jobs (DP1 ingest and validation, DP2 silver, gold and the warehouse, DP3 features), run inside spark-master with spark-submit
 │   └── sql/             DDL of the dwh star schema
 ├── infra/
 │   ├── postgres/init/   SQL run on the first start of Postgres (creates the databases)
+│   ├── airflow/         the Airflow image (Dockerfile.naive)
 │   ├── spark/           the Spark image (Dockerfile.naive) and conf/spark-defaults.conf
 │   └── trino/catalog/   Trino catalog delta (Delta tables through the Hive Metastore)
 ├── scripts/

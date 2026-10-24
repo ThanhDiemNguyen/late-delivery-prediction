@@ -251,8 +251,90 @@ services:
       retries: 18
       start_period: 20s
 
+  # ---------- orch: Airflow (profile orch; runs on top of core and batch) ----------
+
+  # One-shot: migrates the airflow database, creates the admin user, then the connections,
+  # variables and pool (airflow/setup_airflow.py). Only this container reads .env; the others get
+  # the credentials from Airflow's (Fernet-encrypted) connections.
+  airflow-init:
+    build:
+      context: ./infra/airflow
+      dockerfile: Dockerfile.naive
+    image: lastleg/airflow:2.10.5-naive
+    profiles: [orch]
+    user: "185:0"   # the Spark user, so drivers here can write the shared event logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment: &airflow-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+      AIRFLOW__WEBSERVER__WORKERS: "1"
+      AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "600"
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+      AIRFLOW__DATAHUB__ENABLED: ${DATAHUB_ENABLED:-false}   # turned on when the governance profile exists
+    command: >-
+      bash -c "airflow db migrate >/dev/null && echo 'metadata database ready'
+      && (airflow users create --role Admin --username admin --password \"$$AIRFLOW_ADMIN_PASSWORD\"
+      --firstname Admin --lastname Local --email admin@example.invalid >/dev/null 2>&1 || true)
+      && python /opt/airflow/setup_airflow.py"
+    volumes:
+      - ./airflow/setup_airflow.py:/opt/airflow/setup_airflow.py:ro
+
+  airflow-webserver:
+    image: lastleg/airflow:2.10.5-naive
+    profiles: [orch]
+    user: "185:0"
+    command: webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-env
+    ports:
+      - "127.0.0.1:8082:8080"   # UI: user admin, password AIRFLOW_ADMIN_PASSWORD from .env
+    volumes: &airflow-volumes
+      - ./airflow/dags:/opt/airflow/dags:ro
+      - ./jobs:/opt/jobs:ro
+      - ./infra/spark/conf:/opt/spark/conf:ro
+      - spark_events:/opt/spark/events
+      - airflow_logs:/opt/airflow/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/health >/dev/null"]
+      interval: 15s
+      retries: 20
+      start_period: 30s
+
+  # The scheduler runs the tasks (LocalExecutor). A Spark task's driver runs here (client mode),
+  # with the Python of /opt/driver-python; the executors run on spark-worker and connect back to
+  # this hostname.
+  airflow-scheduler:
+    image: lastleg/airflow:2.10.5-naive
+    profiles: [orch]
+    user: "185:0"
+    hostname: airflow-scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-env
+      PYSPARK_DRIVER_PYTHON: /opt/driver-python/bin/python
+    volumes: *airflow-volumes
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8974/health >/dev/null"]
+      interval: 15s
+      retries: 20
+      start_period: 30s
+
 volumes:
   postgres_data:
   seaweedfs_data:
   kafka_data:
   spark_events:
+  airflow_logs:
