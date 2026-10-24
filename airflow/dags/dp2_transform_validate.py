@@ -6,12 +6,14 @@
     warehouse     jobs/dp2_warehouse.py      the dwh star schema, swapped in one transaction
     validate_suite     jobs/validate.py --suite dp2     Great Expectations on day ds
     validate_scd2      jobs/check_dim_courier.py        the SCD2 invariants of dim_courier
+    trigger_dp3        starts dp3_features_validate for the same day, only after both checks passed
 
 Triggered by dp1_ingest_validate for the same day once bronze has passed its suite. Any failed
 check fails the run.
 """
 
 from airflow import DAG
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from lakehouse_tasks import DEFAULT_ARGS, PERIOD_START, spark_job
 
 with DAG(
@@ -34,4 +36,10 @@ with DAG(
         ["--suite", "dp2", "--ds", "{{ ds }}", "--period-end", "{{ var.value.period_end }}", "--fail-on-error"], retries=0,
     )
     scd2 = spark_job("validate_scd2", "check_dim_courier.py", [], retries=0)
-    silver >> dims >> facts >> warehouse >> [suite, scd2]
+    trigger_dp3 = TriggerDagRunOperator(
+        task_id="trigger_dp3",
+        trigger_dag_id="dp3_features_validate",
+        logical_date="{{ logical_date }}",
+        reset_dag_run=True,
+    )
+    silver >> dims >> facts >> warehouse >> [suite, scd2] >> trigger_dp3

@@ -129,6 +129,7 @@ DP2 has no schedule. `dp1_ingest_validate` starts it for the same logical date
 ```text
 ingest stage:   silver >> gold_dims >> gold_facts >> warehouse
 validate stage: >> [validate_suite (jobs/validate.py --suite dp2 --ds {{ ds }} ...), validate_scd2 (jobs/check_dim_courier.py)]
+                >> trigger_dp3
 ```
 
 **Check on the dev slice (2026-10-23).** A run of `dp1_ingest_validate` for 2024-11-30 passed its
@@ -149,8 +150,67 @@ The scheduler looks for new DAG files every 300 s by default, and the run starte
 file was added. `AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL` is now 30 s. After clearing the task,
 the run passed.
 
+### DP3: `dp3_features_validate`
+
+DP3 has no schedule either. `dp2_transform_validate` starts it for the same day once both of its
+checks passed.
+
+```text
+ingest stage:   features (jobs/dp3_features.py --incremental: only what the facts' Change Data Feed changed)
+validate stage: >> [validate_suite (jobs/validate.py --suite dp3 --ds {{ ds }} ...), validate_incremental (jobs/check_cdf.py)]
+```
+
+`validate_incremental` compares every incrementally maintained feature table with a full
+recompute, so each run also checks novel idea 2 ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
+
+### The whole chain
+
+```text
+dp1_ingest_validate ──trigger_dp2──► dp2_transform_validate ──trigger_dp3──► dp3_features_validate
+  (bronze must pass)                   (silver and gold must pass)
+```
+
+**Check on the dev slice (2026-10-23).** One trigger of `dp1_ingest_validate` for 2024-11-28 ran
+the whole chain green. DP1 finished after 66 s, DP2 (triggered by DP1) after 5.7 min, and DP3
+(triggered by DP2) after 8.1 min. The run for 2024-12-01, the day after the period, is green too:
+the DP3 suite passed 19 of 19, skipping only the hub-hour slice, which holds just that day's
+closing hour.
+
+### Failure drill: a corrupted batch blocks everything downstream
+
+The drill was run on 2026-10-23 against the order system.
+
+1. **Back up `oms`.** `pg_dump` (35 MB).
+2. **Insert a corrupted batch.** 100 orders copied from real 2024-12-01 orders, with new ids
+   (9000001 to 9000100), a traffic code the system never used (`"Gridlock "`), status `lost`, and
+   an `updated_ts` after bronze's watermark.
+3. **Rerun DP1 for 2024-12-01** (clearing its run).
+   - `ingest_bronze` succeeded: `bronze.raw_orders: +100 rows`.
+   - `validate_bronze` **failed**: 43 of 45. `traffic` and `status` were out of their value sets
+     for 100 of 2,619 rows each (3.82%).
+   - `trigger_dp2` was `upstream_failed`.
+4. **Check downstream.** No new DP2 run started (still 1) and no DP3 run (still 0). Silver,
+   gold, the warehouse and the features never saw the batch.
+5. **Repair.** The rows were deleted from `oms` and from bronze (Delta keeps the bad version in its
+   history). After clearing the DP1 run:
+   - DP1 passed and triggered DP2;
+   - DP2 passed and triggered DP3;
+   - DP3 passed: `features` read 0 changed fact rows, `validate_incremental` found 0 differences,
+     and the suite passed 19 of 19.
+
+The failed `validate_bronze` still wrote its results
+(`s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json`) before the run stopped. DataHub
+shows them later.
+
 ## Pitfalls
 
+- **A run after `end_date` checks nothing.** A run whose logical date is later than the DAG's
+  `end_date` gets no task instances and is marked success. The first drill run (2024-12-01
+  20:00 UTC, after the 00:00 `end_date`) did exactly that, so it was deleted and the drill reused
+  the 2024-12-01 run.
+- **The Change Data Feed of an unchanged fact.** Delta refuses a starting version past the table's
+  latest one. DP3 failed once when only `fact_delivery` had a new version. It now reads an empty
+  frame for a fact without one.
 - **Never print connections as URIs.** `airflow connections list` prints the password in plain
   text unless the output is filtered, as above.
 - **New mounted folders after a merge.** Before a feature branch is merged, `git checkout develop`

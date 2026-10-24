@@ -84,11 +84,13 @@ def fact_labels(spark: SparkSession, ds: str) -> DataFrame:
     return spark.table("gold.fact_delivery").where(date_key(ds)).select("order_id", F.col("is_late").cast("int").alias("late"))
 
 
-# Daily slices that are empty after the period: couriers stop working and no order is placed, while
-# late deliveries, their scans and order updates still arrive on the next day.
+# Daily slices that are empty or partial after the period: couriers stop working and no order is
+# placed, while late deliveries, their scans and order updates still arrive on the next day. The
+# hub-hour grid ends at that day's first hour, so its 40-row slice is not a full day either.
 EMPTY_AFTER_PERIOD = {
     "bronze.raw_courier_pings", "silver.stg_courier_pings", "gold.fact_courier_activity_hourly",
     "gold.fact_delivery", "gold.fact_delivery joined to its dimensions", "gold.fact_delivery labels",
+    "gold.feat_hub_hourly",
 }
 
 # Datasets that are built for a check instead of read as one table.

@@ -176,7 +176,13 @@ def record_progress(spark: SparkSession, versions: dict[str, int]) -> None:
 
 
 def changed_rows(spark: SparkSession, fact: str, since_version: int, until_version: int) -> DataFrame:
-    """Return the CDF rows of a fact after since_version up to until_version (pre- and post-images both)."""
+    """Return the CDF rows of a fact after since_version up to until_version (pre- and post-images both).
+
+    A fact that has no new version gives an empty frame: Delta refuses a starting version past the
+    table's latest one.
+    """
+    if since_version >= until_version:
+        return spark.table(f"gold.{fact}").limit(0)
     return (
         spark.read.format("delta").option("readChangeFeed", "true")
         .option("startingVersion", since_version + 1).option("endingVersion", until_version)
