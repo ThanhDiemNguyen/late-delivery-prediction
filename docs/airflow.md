@@ -26,8 +26,8 @@ The services now run `lastleg/airflow:2.10.5` from the multi-stage `infra/airflo
 describes the first, naive build, kept as the size baseline.
 
 The naive image is built on `apache/airflow:2.10.5-python3.10` and is 3.23 GB. This first version is
-deliberately naive: everything is copied and installed in one image and nothing is removed. A
-multi-stage rewrite comes later.
+deliberately naive: everything is copied and installed in one image and nothing is removed. The
+multi-stage rewrite above replaced it.
 
 | Part | Why |
 |---|---|
@@ -44,10 +44,12 @@ so the executors on `spark-worker` can connect back to the driver.
 ## Connections, variables and pool
 
 **Who sees the credentials.** Only `airflow-init` reads `.env` (`env_file`). `airflow/setup_airflow.py`
-stores the credentials as Airflow connections, encrypted with `AIRFLOW_FERNET_KEY`, in the `airflow`
-database. The webserver, the scheduler and the DAG code see no password. A DAG reads one through a
-connection id, for example `{{ conn.oms_postgres.password }}` in a templated field. Running the init
-again updates the same entries.
+stores the source credentials as Airflow connections, encrypted with `AIRFLOW_FERNET_KEY`, in the
+`airflow` database. The webserver and the scheduler get two values from Compose instead: the
+metadata database URL (`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`), which uses the same Postgres login,
+and the Fernet key. The DAG code holds no password: a DAG reads one through a connection id, for
+example `{{ conn.oms_postgres.password }}` in a templated field. Running the init again updates the
+same entries.
 
 | Connection | Type | Points to |
 |---|---|---|
@@ -55,12 +57,23 @@ again updates the same entries.
 | `dwh_postgres` | postgres | `postgres:5432/dwh`, the warehouse |
 | `lakehouse_s3` | aws | SeaweedFS S3, `http://seaweedfs:8333` (`app-exports`, `lakehouse`) |
 | `spark_lakehouse` | spark | `spark://spark-master:7077`, client mode |
+| `datahub_rest_default` | datahub-rest | `http://datahub-gms:8080`, where the DataHub plugin and `publish_assertions` send metadata |
 
-| Variable | Value |
-|---|---|
-| `jobs_dir` | `/opt/jobs` |
-| `lakehouse_bucket`, `exports_bucket` | `lakehouse`, `app-exports` |
-| `period_start`, `period_end` | `2024-06-01`, `2024-11-30` |
+Every Spark task gets its hosts and logins from these connections, through templated `env_vars`
+in `airflow/dags/lakehouse_tasks.py`: `OMS_JDBC_URL` and the login from `oms_postgres`, the S3 keys
+from `lakehouse_s3`. The `warehouse` task writes to `dwh` with `DWH_JDBC_URL` and the login of
+`dwh_postgres`.
+
+| Variable | Value | Used by |
+|---|---|---|
+| `jobs_dir` | `/opt/jobs` | every Spark task: the path of the job file |
+| `lakehouse_bucket` | `lakehouse` | every Spark task (`LAKEHOUSE_BUCKET`, read by `jobs/common.py`), and `publish_assertions`, which reads the results from it |
+| `exports_bucket` | `app-exports` | every Spark task (`EXPORTS_BUCKET`); DP1 reads the export files from it |
+| `period_end` | `2024-11-30` | the three validate tasks (`--period-end`) |
+
+The start of the period, 2024-06-01, is not a variable: it is each DAG's `start_date`, which
+Airflow reads when it parses the DAG file, before any template is rendered. It is
+`PERIOD_START` in `lakehouse_tasks.py`.
 
 **Pool.** `spark` has 1 slot, so only one Spark application runs at a time. The cluster has one
 4-core worker, and two drivers would starve each other.
@@ -79,6 +92,22 @@ $ docker compose exec airflow-scheduler airflow pools list
 default_pool  128    spark  1  one Spark application at a time (one 4-core worker)
 ```
 
+### Checks after the review fixes (2026-10-24)
+
+`period_start` was removed: nothing read it, and the DAGs' start date cannot come from a variable
+(above). The variables and connections the tasks use, and the values the `warehouse` task gets
+from them (`airflow tasks render`, with the logins and passwords left out):
+
+```text
+$ docker compose exec airflow-scheduler airflow variables list
+jobs_dir  lakehouse_bucket  exports_bucket  period_end
+$ docker compose exec airflow-scheduler airflow tasks render dp2_transform_validate warehouse 2024-11-30T12:00:00+00:00
+'OMS_JDBC_URL': 'jdbc:postgresql://postgres:5432/oms'
+'LAKEHOUSE_BUCKET': 'lakehouse'
+'EXPORTS_BUCKET': 'app-exports'
+'DWH_JDBC_URL': 'jdbc:postgresql://postgres:5432/dwh'
+```
+
 The installed versions were checked inside the image:
 
 - Airflow 2.10.5, with the Spark provider and the DataHub plugin importable.
@@ -87,7 +116,8 @@ The installed versions were checked inside the image:
   (from `SPARK_HOME`).
 
 The UI shows the same entries (Admin → Connections, Variables, Pools). The connection list has no
-login or password column, and the variables hold no secret:
+login or password column, and the variables hold no secret. The variables page is from after the
+review fixes:
 
 ![Airflow connections](images/airflow/connections.png)
 
@@ -101,8 +131,10 @@ The DAGs build their Spark tasks with one factory, `airflow/dags/lakehouse_tasks
 
 - **How it submits:** `SparkSubmitOperator` on connection `spark_lakehouse`, in pool `spark`, with
   the job path from variable `jobs_dir`.
-- **Credentials:** they come from connections in templated `env_vars`
-  (`{{ conn.oms_postgres.password }}`, `{{ conn.lakehouse_s3.password }}`).
+- **Credentials, hosts and buckets:** they come from connections and variables in templated
+  `env_vars` (`{{ conn.oms_postgres.password }}`, `{{ conn.lakehouse_s3.password }}`,
+  `{{ var.value.lakehouse_bucket }}`). A task can add or replace entries (`env=`), as the
+  `warehouse` task does for `dwh_postgres`.
 - **Spark settings:** `spark.driver.host` is set to `airflow-scheduler`.
 
 The DAGs run from 2024-06-01 to 2024-12-01. The extra last day loads the parcels ordered on
@@ -117,9 +149,17 @@ ingest_bronze (jobs/dp1_ingest.py --until {{ ds }})  >>  validate_bronze (jobs/v
 validate_bronze  >>  publish_assertions (the suite's results to DataHub, trigger rule all_done)
 ```
 
+| Task | What it does | Details |
+|---|---|---|
+| `ingest_bronze` | copies the `oms` rows changed since bronze's watermark, and the export dates not loaded yet, into the `raw_` Delta tables | [DP1: ingest into bronze](pipelines.md#dp1-ingest-into-bronze-jobsdp1_ingestpy) |
+| `validate_bronze` | Great Expectations on day `ds` of bronze (73 expectations): the sources' promises, dirty values included | [DP1: validate bronze](pipelines.md#dp1-validate-bronze-jobsvalidatepy---suite-dp1) |
+| `publish_assertions` | sends the suite's results to DataHub as assertions, whether the suite passed or failed | [datahub.md](datahub.md) |
+| `trigger_dp2` | starts `dp2_transform_validate` for the same day, only after `validate_bronze` passed | |
+
 `validate_bronze` fails the run when any expectation fails, so nothing after it runs on bad
-bronze. For a day after `period_end`, the suite skips the slices that are empty then: pings, the
-hourly activity, and the orders placed that day.
+bronze. For a day after `period_end`, the DP1 suite skips the pings slice, which has no rows then
+(45 of its 73 expectations remain). The DP2 and DP3 suites skip their ping, activity, fact and
+hub-hour slices in the same way.
 
 **Check on the dev slice (2026-10-23).** Bronze's rows from local 2024-11-29 on were deleted with a
 Delta `DELETE`, so the DAG had real work to do. (The deleted rows stay in the table's history, and
@@ -153,6 +193,17 @@ validate stage: >> [validate_suite (jobs/validate.py --suite dp2 --ds {{ ds }} .
 validate_suite >> publish_assertions (the suite's results to DataHub, trigger rule all_done)
 ```
 
+| Task | What it does | Details |
+|---|---|---|
+| `silver` | cleans the new bronze rows into the `stg_` tables: merges `oms` changes, dedups the re-uploaded pings, and compacts each new ping date | [DP2: silver](pipelines.md#dp2-clean-bronze-into-silver-jobsdp2_silverpy) |
+| `gold_dims` | builds the dimensions, and merges the courier changes into the SCD2 `dim_courier` | [DP2: gold dimensions](pipelines.md#dp2-gold-dimensions-jobsdp2_gold_dimspy) |
+| `gold_facts` | merges `fact_delivery` and adds the new hours of `fact_courier_activity_hourly`, with the NULL-isolation join for `late_trip_min` | [DP2: gold facts](pipelines.md#dp2-gold-facts-jobsdp2_gold_factspy) |
+| `warehouse` | loads the star schema into `dwh` staging, then swaps it in one transaction | [DP2: warehouse](pipelines.md#dp2-load-the-warehouse-jobsdp2_warehousepy) |
+| `validate_suite` | Great Expectations on day `ds` of silver and gold (62 expectations) | [DP2: validate](pipelines.md#dp2-validate-silver-and-gold-jobsvalidatepy---suite-dp2) |
+| `validate_scd2` | checks the SCD2 invariants of `dim_courier` against the change audit | [`dim_courier`, SCD type 2](pipelines.md#dim_courier-scd-type-2) |
+| `publish_assertions` | sends the suite's results to DataHub as assertions, pass or fail | [datahub.md](datahub.md) |
+| `trigger_dp3` | starts `dp3_features_validate` for the same day, only after both checks passed | |
+
 **Check on the dev slice (2026-10-23).** A run of `dp1_ingest_validate` for 2024-11-30 passed its
 three tasks and triggered `dp2_transform_validate` for the same day. All six DP2 tasks succeeded
 in 3.5 minutes:
@@ -183,15 +234,30 @@ checks passed.
 ```text
 ingest stage:   features (jobs/dp3_features.py --incremental: only what the facts' Change Data Feed changed)
 validate stage: >> [validate_suite (jobs/validate.py --suite dp3 --ds {{ ds }} ...), validate_incremental (jobs/check_cdf.py)]
+                >> checks_passed
 validate_suite >> publish_assertions (the suite's results to DataHub, trigger rule all_done)
 ```
+
+| Task | What it does | Details |
+|---|---|---|
+| `features` | recomputes and merges only the feature rows whose couriers, hubs and zones the facts' Change Data Feed touched | [DP3: features](pipelines.md#dp3-offline-feature-tables-jobsdp3_featurespy), [novel_cdf_incremental.md](novel_cdf_incremental.md) |
+| `validate_suite` | Great Expectations on day `ds` of the three `feat_` tables (31 expectations) | [DP3: validate](pipelines.md#dp3-validate-the-feature-tables-jobsvalidatepy---suite-dp3) |
+| `validate_incremental` | compares every incremental feature table with a full recompute | [novel_cdf_incremental.md](novel_cdf_incremental.md) |
+| `publish_assertions` | sends the suite's results to DataHub as assertions, pass or fail | [datahub.md](datahub.md) |
+| `checks_passed` | succeeds only when both checks passed, so the run's state is the checks' result | |
+
+**Why `checks_passed`.** Airflow sets a run's state from its last tasks. DP1 and DP2 end in a
+trigger task that runs only when their checks passed, so a failed check fails the run. DP3 has no
+next DAG, and `publish_assertions` succeeds even after a failed suite, so a failed suite used to
+leave the run green. `checks_passed` (an `EmptyOperator`) runs only when both checks passed: a
+failed check now marks it `upstream_failed`, and the run fails.
 
 `validate_incremental` compares every incrementally maintained feature table with a full
 recompute, so each run also checks novel idea 2 ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
 
-![DP3 grid](images/airflow/dp3_features_validate-grid.png)
+![DP3 grid: the runs so far; checks_passed has run since the review fixes](images/airflow/dp3_features_validate-grid.png)
 
-![DP3 graph, run 2024-12-01](images/airflow/dp3_features_validate-graph.png)
+![DP3 graph: features, the two checks, then checks_passed and publish_assertions](images/airflow/dp3_features_validate-graph.png)
 
 ### The whole chain
 
@@ -251,12 +317,39 @@ that the ping part of the cost grows with the rows:
 | Step | Measured at full scale | One full-scale day (projected) |
 |---|---|---:|
 | ping dedup (window) | 73.3 s for 7 days | about 10 s |
-| pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days; one-day trials 163 to 322 s | 2 to 5 min: the join shuffles all 80.8 million orders every day, which the one-day trials measured as most of their time; the pings add about 6 s |
+| pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days; 294 s in the one-day trial ([spark_optimization.md](spark_optimization.md#the-choice-for-the-pipeline)) | 2 to 5 min: the join shuffles all 80.8 million orders every day, which is most of the one-day trial's time; the pings add about 6 s |
 | compaction and Z-order of the new pings | 443 s for 7 days | about 63 s |
 
 A daily DP2 at full scale therefore adds minutes, not hours, to the slice's 4.4 minutes. A full
 rebuild of 183 days would take hours: about 19 minutes for the join alone, and about 3 hours for
 compacting the whole history. That is what the 100 GB runs measured.
+
+### Run after the review fixes (2026-10-24)
+
+The review fixes changed how the tasks get their settings (the buckets and both JDBC URLs from
+Airflow), DP2's lineage lists, and DP3's last task (`checks_passed`). DP2 was triggered for
+2024-11-30 (12:00 UTC), and it triggered DP3; DP1 was not run, for the reason above.
+
+```bash
+docker compose exec airflow-scheduler airflow dags trigger dp2_transform_validate -e 2024-11-30T12:00:00+00:00 -r manual__review_fixes_2024-11-30
+```
+
+| DAG | Task | Time | Result |
+|---|---|---:|---|
+| `dp2_transform_validate` (green) | `silver` | 29.5 s | `stg_orders` 808,000 rows; no new ping or scan export date |
+| | `gold_dims` | 34.7 s | `dim_zone` 1,497 rows; `dim_courier`: no new version after change 1093 |
+| | `gold_facts` | 47.3 s | `fact_delivery` 808,000 rows; no new ping date |
+| | `warehouse` | 54.9 s | written through `dwh_postgres`: `fact_delivery` 408,000, `obt_delivery` 168,000, `dim_courier` 799 |
+| | `validate_suite` | 72.7 s | 62 of 62 |
+| | `validate_scd2` | 31.3 s | 799 versions from 1,093 audit rows; 0 violations |
+| | `publish_assertions` | 1.8 s | 62 assertions sent to DataHub, 0 failed |
+| `dp3_features_validate` (green) | `features` | 27.1 s | the Change Data Feed listed 0 changed fact rows, so no feature row changed |
+| | `validate_suite` | 39.5 s | 31 of 31 |
+| | `validate_incremental` | 101.0 s | 0 differences from a full recompute: 33,836, 175,760 and 275,448 rows |
+| | `checks_passed` | 0 s | both checks passed |
+| | `publish_assertions` | 1.2 s | 31 assertions sent to DataHub, 0 failed |
+
+DataHub's lineage after this run is in [datahub.md](datahub.md#checks-after-the-lineage-fix-2026-10-24).
 
 ### Failure drill: a corrupted batch blocks everything downstream
 

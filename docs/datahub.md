@@ -117,11 +117,11 @@ recipes ingested:
 |---|---|---|---|
 | `dp1_ingest_validate` | `ingest_bronze` | 5 `oms` tables, 2 app exports | 7 bronze tables |
 | | `validate_bronze` | 7 bronze tables | |
-| `dp2_transform_validate` | `silver` | 7 bronze tables | 6 silver tables |
+| `dp2_transform_validate` | `silver` | 6 bronze tables (not `raw_couriers`: `dim_courier` is built from the courier changes) | 6 silver tables |
 | | `gold_dims` | `stg_hubs`, `stg_customers`, `stg_courier_changes` | 5 dimensions |
 | | `gold_facts` | `stg_orders`, `stg_courier_pings`, `dim_courier`, `dim_hub` | 2 facts |
 | | `warehouse` | 5 dimensions, `fact_delivery` | 7 `dwh` tables |
-| | `validate_suite`, `validate_scd2` | the tables they check | |
+| | `validate_suite`, `validate_scd2` | the tables they check (the suite: 3 silver tables, 5 dimensions, 2 facts) | |
 | `dp3_features_validate` | `features` | 2 facts, 4 dimensions | 3 `feat_` tables |
 | | `validate_suite`, `validate_incremental` | the tables they check | |
 
@@ -141,13 +141,28 @@ green. Then a GraphQL query on GMS returned:
   the sources: 6 gold, 5 silver, 7 bronze, the 5 `oms` tables and the 2 app exports. The silver
   table that does not appear is `stg_parcel_scans`, because no gold job reads it.
 
+### Checks after the lineage fix (2026-10-24)
+
+The `silver` task listed all 7 bronze tables as inputs, but `jobs/dp2_silver.py` reads 6: it never
+reads `raw_couriers`. The DP2 suite also listed silver tables it does not check. Both lists now
+match the code, and the DP3 DAG gained its `checks_passed` task ([airflow.md](airflow.md#dp3-dp3_features_validate)).
+After the DP2 and DP3 run for 2024-11-30 (12:00 UTC), the same GraphQL queries returned:
+
+- 3 DataFlows and 17 DataJobs: the 16 tasks above and `checks_passed`.
+- `silver`: 6 inputs and 6 outputs. `validate_suite` of DP2: 10 inputs.
+- The upstream lineage of `dwh.public.fact_delivery`: 6 gold, 5 silver, 6 bronze, the 5 `oms`
+  tables and the 2 app exports. `raw_couriers` is no longer upstream of the warehouse.
+- The two `publish_assertions` tasks sent 62 and 31 assertions, 0 failed.
+
+The DP3 pipeline and the `silver` lineage below were captured after this run.
+
 Each pipeline in the UI, with its tasks:
 
 ![DP1 pipeline](images/datahub/pipeline-dp1.png)
 
 ![DP2 pipeline](images/datahub/pipeline-dp2.png)
 
-![DP3 pipeline](images/datahub/pipeline-dp3.png)
+![DP3 pipeline: features, the two checks, publish_assertions and checks_passed](images/datahub/pipeline-dp3.png)
 
 The lineage of the tasks that write each zone. DP1's `ingest_bronze` reads the `oms` tables and the
 two app exports and writes bronze:
@@ -156,7 +171,7 @@ two app exports and writes bronze:
 
 DP2's `silver`, `gold_facts` and `warehouse`:
 
-![DP2 silver lineage](images/datahub/task-dp2-silver.png)
+![DP2 silver lineage: 6 bronze tables in, 6 silver tables out](images/datahub/task-dp2-silver.png)
 
 ![DP2 gold_facts lineage](images/datahub/task-dp2-gold-facts.png)
 
