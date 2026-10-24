@@ -185,6 +185,10 @@ This runs in the `gold_facts` task of the `dp2_transform_validate` DAG
 
 The DP2 suite then passed 62 of 62 expectations for 2024-11-27, the new one included.
 
+**In Airflow (2026-10-24).** The `dp2_transform_validate` run for 2024-11-29 was green in 266 s.
+`gold_facts` took 41.9 s, the suite passed 62 of 62, and `publish_assertions` sent the new check to
+DataHub with the others. The run is described in [airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24).
+
 ## Schema evolution: app v2 pings next to v1 (`jobs/schema_evolution_demo.py`)
 
 **The problem.** From 2024-09-01 the courier app v2 rolls out over 14 days. v2 replaces

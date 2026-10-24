@@ -201,6 +201,58 @@ the whole chain green. DP1 finished after 66 s, DP2 (triggered by DP1) after 5.7
 the DP3 suite passed 19 of 19, skipping only the hub-hour slice, which holds just that day's
 closing hour.
 
+### Run after the 100 GB work (2026-10-24)
+
+After the Spark optimizations, two DP2 jobs changed:
+
+- `gold_facts` joins pings to `fact_delivery` for `late_trip_min`, with the NULL trip ids kept out
+  of the shuffle;
+- `silver` compacts each new ping date, ordered by courier
+  ([spark_optimization.md](spark_optimization.md), [storage_optimization.md](storage_optimization.md)).
+
+The facts were rebuilt once for the new column. Then DP2 was triggered for 2024-11-29 (12:00 UTC),
+and it triggered DP3:
+
+```bash
+docker compose exec airflow-scheduler airflow dags trigger dp2_transform_validate -e 2024-11-29T12:00:00+00:00
+```
+
+DP1 was not run. After the full-scale generation, `oms` and `app-exports` hold the 100 GB sources,
+while the lakehouse holds the slice. DP1 would copy every full-scale row changed after bronze's
+watermark into the slice's bronze. DP2 reads bronze, so it ran on the slice as before.
+
+| DAG | Task | Time | Result |
+|---|---|---:|---|
+| `dp2_transform_validate` (266 s) | `silver` | 33.6 s | no new export date, so nothing to compact |
+| | `gold_dims` | 37.8 s | |
+| | `gold_facts` | 41.9 s | `fact_delivery` 808,000 rows; no new ping date |
+| | `warehouse` | 50.7 s | `dwh.fact_delivery` 408,000, `obt_delivery` 168,000, with the three indexes |
+| | `validate_suite` | 63.6 s | 62 of 62, the new `late_trip_min` check included |
+| | `validate_scd2` | 30.8 s | 799 versions from 1,093 audit rows; 0 violations |
+| | `publish_assertions` | 4.3 s | 62 assertions sent to DataHub, 0 failed |
+| `dp3_features_validate` (264 s) | `features` | 143.7 s | the rebuild rewrote every fact row, so the Change Data Feed listed them all |
+| | `validate_suite` | 34.7 s | 31 of 31 |
+| | `validate_incremental` | 81.2 s | 0 differences from a full recompute |
+| | `publish_assertions` | 1.1 s | 31 assertions sent to DataHub, 0 failed |
+
+DataHub's Trino recipe ran again afterwards. `fact_courier_activity_hourly` now shows
+`late_trip_min` in its schema, and 6 assertions instead of 5.
+
+**At full scale.** DP2 runs one day at a time. The pieces that grow with the data were measured
+at 100 GB ([spark_optimization.md](spark_optimization.md),
+[storage_optimization.md](storage_optimization.md)). The projection for one full-scale day assumes
+that the cost grows with the rows, and the one-day trials agree in size:
+
+| Step | Measured at full scale | One full-scale day (projected) |
+|---|---|---:|
+| ping dedup (window) | 73.3 s for 7 days | about 10 s |
+| pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days | about 6 s of join, plus the scans |
+| compaction and Z-order of the new pings | 443 s for 7 days | about 63 s |
+
+A daily DP2 at full scale therefore adds minutes, not hours, to the slice's 4.4 minutes. A full
+rebuild of 183 days would take hours: about 19 minutes for the join alone, and about 3 hours for
+compacting the whole history. That is what the 100 GB runs measured.
+
 ### Failure drill: a corrupted batch blocks everything downstream
 
 The drill was run on 2026-10-23 against the order system.

@@ -110,8 +110,8 @@ SELECT ping_date, count(*) FROM pings WHERE hub_id = 17 GROUP BY ping_date      
 | after `VACUUM` (23.8 s) | 28 (4.27 GB) | 1 file, 148.6 MiB, 0.39 s | 28 files, 4.0 GiB, 0.89 s |
 
 - **Compaction fixes the small files.** The week query opens 42 files instead of 1,400, and runs
-  in 2.44 s instead of 23.52 s, 9.6 times faster. Most of that time was spent opening and listing
-  1,400 small objects in SeaweedFS.
+  in 2.44 s instead of 23.52 s, 9.6 times faster. It reads almost the same bytes (4.3 GiB against
+  4.5 GiB), so the time went into the number of files, not into the data.
 - **Z-order lets the courier query skip files.** Within the date it reads 1 file of 6, and
   3.6 million rows instead of 23.7 million. That is 0.62 s against 1.34 s after compaction alone,
   and 2.83 s at the start: 4.6 times faster overall.
