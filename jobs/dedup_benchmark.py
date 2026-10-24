@@ -13,7 +13,9 @@ folder. Both methods keep the earliest upload of each key:
                run the window only on the rows of the duplicated keys
 
 Both report the rows in and out, a checksum of the kept rows (they must agree), the wall time, and
-the shuffle and spill of every stage. The result goes to s3a://lakehouse/_benchmarks/dedup/.
+the shuffle and spill of every stage. The checksum hashes every column, so Spark reads and moves
+whole rows as silver does; a checksum of the key alone would let it prune the other columns. The
+result goes to s3a://lakehouse/_benchmarks/dedup/.
 """
 
 import argparse
@@ -45,8 +47,8 @@ def targeted(day: DataFrame) -> DataFrame:
 
 
 def summary(df: DataFrame) -> dict:
-    """Return the row count and an order-free checksum of the kept rows."""
-    row = df.agg(F.count("*").alias("rows"), F.sum(F.xxhash64(*KEY, "uploaded_ts")).alias("hash")).first()
+    """Return the row count and an order-free checksum of the kept rows, over all their columns."""
+    row = df.agg(F.count("*").alias("rows"), F.sum(F.xxhash64(*df.columns)).alias("hash")).first()
     return {"rows": row.rows, "hash": row.hash}
 
 

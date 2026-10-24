@@ -300,40 +300,50 @@ def targeted(day):
 ```
 
 **Results (2026-10-24), on the first 7 full-scale export dates.** The table shows each method's
-time, and the shuffle and spill summed over its stages.
+time, and the shuffle and spill summed over its stages. The checksum hashes every column of the
+kept rows, so Spark reads and moves whole rows, as silver does.
 
 | Method | Rows in | Rows kept | Removed | Wall time | Shuffle written | Spill, memory / disk |
 |---|---:|---:|---:|---:|---:|---:|
-| window | 166,023,384 | 162,768,960 | 3,254,424 (1.9994% of kept) | **73.3 s** | 2.12 GB | 7.58 / 2.06 GB |
-| targeted | 166,023,384 | 162,768,960 | 3,254,424 (1.9994% of kept) | 120.2 s | **1.28 GB** | 29.09 / 1.71 GB |
+| window | 166,023,384 | 162,768,960 | 3,254,424 (1.9994% of kept) | **110.7 s** | 7.59 GB | 13.69 / 5.04 GB |
+| targeted | 166,023,384 | 162,768,960 | 3,254,424 (1.9994% of kept) | 144.0 s | **1.40 GB** | 29.09 / 1.71 GB |
 
 - The rows removed match the injection. The generator re-uploads 2.00% of the rows, and both
   methods remove 1.9994% of the rows they keep.
-- The two methods agree. They keep the same rows, with the same checksum
-  (−6,968,598,871,620,969,569).
-- The targeted method writes 40% less shuffle, as planned, because Spark shuffles only the two key
-  columns and the 4% of rows with a duplicated key.
-- But it is 64% slower here. Spark reads each day three times: for the key count, the anti-join
-  and the semi-join. The seven days also run one after another, and the job of each day is too
-  small to keep the 4 cores busy.
+- The two methods agree. They keep the same rows, with the same checksum over all columns
+  (−8,388,574,024,912,642,748).
+- The targeted method writes 82% less shuffle, as planned. Spark shuffles only the key counts and
+  the rows of the duplicated keys.
+- But it is 30% slower. Spark reads each day three times: for the key count, the semi-join and
+  the anti-join. The seven days also run one after another, and the job of each day is too small
+  to keep the 4 cores busy.
+
+A first run that morning hashed only the key and `uploaded_ts`. Spark then read and shuffled only
+those three columns (window 73.3 s and 2.12 GB of shuffle, targeted 120.2 s and 1.28 GB). That
+run compared key-only deduplication, not silver's, so the table above replaces it.
 
 **What the Spark UI shows.** The window method has one big shuffle, in stage 29. That stage reads
-the 7 days (166,023,384 rows, 294.1 MiB of Parquet) in 34 tasks. It writes 2,019.7 MiB of shuffle
-for the `row_number()` window and spills 3.6 GiB in memory and 914.6 MiB to disk. Its tasks are
-even, 4 s at the median and 10 s at most, so there is no skew to fix. The only problem here is the
-volume.
+the 7 days (166,023,384 rows, 2.6 GiB of Parquet) in 34 tasks. It writes 7.1 GiB of shuffle and
+spills 12.7 GiB in memory and 4.7 GiB to disk. The shuffle holds 162,768,960 records, exactly the
+rows kept: Spark 3.5 applies the `row_number() = 1` filter inside each map task, before the
+shuffle. So the duplicates never leave the map side, but every column of every kept row is
+shuffled.
 
-![dedup_window, stage 29: 2,019.7 MiB of shuffle written and 3.6 GiB spilled for one window over all 7 days](images/spark/dedup-window-shuffle-stage.png)
+The tasks are even, 9 s at the median and 11 s at most, so there is no skew to fix. The only
+problem here is the volume.
+
+![dedup_window, stage 29: 7.1 GiB of shuffle written and 12.7 GiB spilled for one window over all 7 days](images/spark/dedup-window-shuffle-stage.png)
 
 The targeted method has many small stages instead. For each day, one stage reads the two key
-columns (3.2 MiB) and shuffles the key counts. Two more stages read the whole day again (42 MiB
-each), for the anti-join and the semi-join. Each stage has 4 to 9 tasks and lasts 1 to 7 s, so the
-4 cores wait between stages. That is where most of its extra 47 s goes.
+columns (3.2 MiB) and shuffles 164 MiB of key counts. Two more stages read the whole day again
+(386 MiB each). One sends the rows of the duplicated keys to the window, which is only 22.7 MiB of
+shuffle; the other passes every other row through the anti-join. Each stage has 4 to 9 tasks and
+lasts 3 to 8 s, so the 4 cores wait between stages. That is where most of its extra 33 s goes.
 
-![dedup_targeted, all stages: per day, a key-count stage of 3.2 MiB, then two more reads of the 42 MiB day](images/spark/dedup-targeted-stages.png)
+![dedup_targeted, all stages: per day, a key-count stage of 3.2 MiB, then two more reads of the 386 MiB day](images/spark/dedup-targeted-stages.png)
 
-A ping has 10 to 12 narrow columns, so shuffling whole rows costs less than reading the files
-from SeaweedFS again.
+A ping has 10 to 12 narrow columns. On this cluster, shuffling the whole rows once costs less
+than reading each day from SeaweedFS three times.
 
 **The choice for the pipeline.** Silver keeps the window method
 (`jobs/dp2_silver.py`, `row_number()` over `(courier_id, device_seq)` by `uploaded_ts`). The
