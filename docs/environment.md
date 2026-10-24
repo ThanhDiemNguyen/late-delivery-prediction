@@ -27,6 +27,7 @@ publish a `linux/arm64` build, so no service needs Rosetta (`platform: linux/amd
 | SeaweedFS | `chrislusf/seaweedfs:4.48` | linux/arm64 | 0.50 GB | Go binary | core |
 | Kafka | `apache/kafka:3.9.2` | linux/arm64 | 0.41 GB | JVM | core |
 | Spark master, worker, history | `apache/spark:3.5.9-scala2.12-java17-python3-ubuntu` | linux/arm64 | 1.13 GB | Ubuntu 22.04.5, Python 3.10.12, Java 17.0.19 | lakehouse |
+| Spark (built) | `lastleg/spark:3.5.9-naive` from `infra/spark/Dockerfile.naive` | linux/arm64 | 2.05 GB | the base plus Delta 3.3.3, S3A and JDBC jars ([lakehouse.md](lakehouse.md)) | lakehouse |
 | Hive Metastore | `starburstdata/hive:3.1.2-e.18` | linux/arm64 | 1.44 GB | JVM | lakehouse |
 | Trino | `trinodb/trino:479` | linux/arm64 | 1.36 GB | Java 25.0.1 | query |
 | Flink jobmanager, taskmanager | `flink:1.20.5-scala_2.12-java17` | linux/arm64 | 0.80 GB | Ubuntu 22.04.5, Java 17.0.20.1, no Python | streaming |

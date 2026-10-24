@@ -34,16 +34,18 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 ## Architecture
 
 The full deployment diagram is added once all the services exist. The deployable units built so
-far are all in the `core` Compose profile ([details](docs/core_services.md)):
+far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch` profile:
 
 | Unit | Role |
 |---|---|
 | Postgres 16 | source database `oms` (order system), plus the `dwh`, `airflow`, `metastore` and `datahub` databases |
 | SeaweedFS | S3 object store: bucket `app-exports` (courier-app exports, a source) and bucket `lakehouse` |
 | Kafka (KRaft) | live parcel-scan events and Flink output topics |
+| Hive Metastore | catalog of the lakehouse tables (profiles `batch` and `query`, [details](docs/lakehouse.md)) |
+| Spark master, worker, history server | builds the Delta tables in bucket `lakehouse` (profile `batch`) |
 
 Start them with `cp .env.example .env` (then change the passwords) and
-`docker compose --profile core up -d --wait`.
+`docker compose --profile core --profile batch up -d --wait`.
 
 ## Repo structure
 
@@ -55,8 +57,10 @@ Start them with `cp .env.example .env` (then change the passwords) and
 │   └── sql/             DDL of the oms tables, applied by the generator
 ├── seed/                the Kaggle seed file (gzipped) and its MIT license
 ├── tests/               pytest checks, run with: uv run pytest
+├── jobs/                Spark jobs, run inside spark-master with spark-submit
 ├── infra/
-│   └── postgres/init/   SQL run on the first start of Postgres (creates the databases)
+│   ├── postgres/init/   SQL run on the first start of Postgres (creates the databases)
+│   └── spark/           the Spark image (Dockerfile.naive) and spark-defaults.conf
 ├── scripts/
 │   └── safe-shutdown.sh stop everything, quit Docker Desktop and eject the SSD
 ├── docs/                one document per major part, linked from docs/README.md
