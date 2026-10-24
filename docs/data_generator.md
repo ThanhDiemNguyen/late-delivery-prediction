@@ -257,7 +257,7 @@ after loading the dev slice:
 | Skew | Downtown LA 24.84% of orders, the top 10 hubs 59.89% |
 | Area mix | Metropolitan 55.08%, Urban 35.23%, Semi-Urban 6.67%, Other 3.02% |
 | Black Friday week | 12,000 orders a day, 3× normal |
-| Size | `oms` is 238 MB (about 280 B per order with its indexes), so about 23 GB at full scale |
+| Size | `oms` is 238 MB. The orders table takes about 290 B per order with its indexes, so about 23 GB at full scale |
 
 ## Courier-app exports in SeaweedFS
 
@@ -374,7 +374,7 @@ fixes the full-scale numbers.
 ## Checking the generated data
 
 `uv run python -m generator.check_data --scale 0.01` reads `oms` with SQL and the exports with
-pyarrow. It compares each injected rate with its target and tolerance (28 checks), and exits with
+pyarrow. It compares each injected rate with its target and tolerance (29 checks), and exits with
 status 1 if any check fails. The results and the full-scale dry run are in
 [data_characteristics.md](data_characteristics.md).
 

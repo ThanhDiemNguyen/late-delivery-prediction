@@ -30,23 +30,23 @@ publish a `linux/arm64` build, so no service needs Rosetta (`platform: linux/amd
 | Spark (built) | `lastleg/spark:3.5.9-naive` from `infra/spark/Dockerfile.naive` (the services now run `lastleg/spark:3.5.9`, 1.96 GB; see [built images](#built-images-naive-against-multi-stage)) | linux/arm64 | 2.82 GB | the base plus Delta 3.3.3, S3A and JDBC jars, Great Expectations, Sedona ([lakehouse.md](lakehouse.md)) | lakehouse |
 | Hive Metastore | `starburstdata/hive:3.1.2-e.18` | linux/arm64 | 1.44 GB | JVM | lakehouse |
 | Trino | `trinodb/trino:479` | linux/arm64 | 1.36 GB | Java 25.0.1 | query |
-| Flink jobmanager, taskmanager | `flink:1.20.5-scala_2.12-java17` | linux/arm64 | 0.80 GB | Ubuntu 22.04.5, Java 17.0.20.1, no Python | streaming |
-| Airflow | `apache/airflow:2.10.5-python3.10` | linux/arm64 | 1.57 GB | Debian 12, Python 3.10.16 | orchestration |
+| Flink jobmanager, taskmanager | `flink:1.20.5-scala_2.12-java17` (the services run `lastleg/flink:1.20.5`, 1.68 GB, with PyFlink; see [built images](#built-images-naive-against-multi-stage)) | linux/arm64 | 0.80 GB | Ubuntu 22.04.5, Java 17.0.20.1, no Python | streaming |
+| Airflow | `apache/airflow:2.10.5-python3.10` (the services run `lastleg/airflow:2.10.5`, 2.31 GB, built on the slim image; see [built images](#built-images-naive-against-multi-stage)) | linux/arm64 | 1.57 GB | Debian 12, Python 3.10.16 | orchestration |
 | OpenSearch (DataHub search) | `opensearchproject/opensearch:2.19.7` | linux/arm64 | 1.18 GB | JVM | governance |
 | DataHub GMS | `acryldata/datahub-gms:v1.5.0.6` | linux/arm64 | 1.43 GB | JVM | governance |
 | DataHub frontend | `acryldata/datahub-frontend-react:v1.5.0.6` | linux/arm64 | 0.81 GB | JVM | governance |
 | DataHub upgrade job | `acryldata/datahub-upgrade:v1.5.0.6` | linux/arm64 | 0.87 GB | JVM | governance |
-| DataHub actions | `acryldata/datahub-actions:v1.5.0.6` | linux/arm64 | 3.32 GB | Python 3.11.15 | governance |
+| DataHub actions | `acryldata/datahub-actions:v1.5.0.6` | linux/arm64 | 3.32 GB | Python 3.11.15 | pulled, no service runs it |
 
 **Size** is `docker image inspect --format '{{.Size}}'`, the uncompressed size in the `overlay2`
-store, in decimal GB. The Docker image optimization step later uses the same measure, so its
-before and after numbers compare directly with this table.
+store, in decimal GB. The built images section below uses the same measure, so its naive and
+multi-stage sizes compare directly with this table.
 
 **Python 3.10 everywhere a job runs.** The Spark image and the Airflow image both run Python 3.10,
 so a Spark driver started from Airflow and the Spark workers share a minor version (PySpark
-refuses to run when they differ). The Flink image has no Python; the PyFlink section below shows
-the 3.10 that its Ubuntu 22.04 base installs. DataHub actions runs Python 3.11, but it is a
-separate service and does not exchange Python objects with any job.
+refuses to run when they differ). The Flink base image has no Python; the PyFlink section below
+shows the 3.10 that Ubuntu 22.04 installs. DataHub actions runs Python 3.11, but no
+Compose service runs it.
 
 Reproduce the table:
 
@@ -134,11 +134,12 @@ Airflow was read again 6 min after start, which gives the range in its row.
 Not measured here, because they need other services configured first:
 
 - **Hive Metastore** needs a JDBC URL, and on first start it creates its schema in the `metastore`
-  database. It is measured when the lakehouse services are added. The image sets no heap, so the
-  JVM default applies: a maximum heap of 25% of the memory it can see.
-- **DataHub** GMS, frontend, upgrade and actions need OpenSearch, Kafka and Postgres configured.
-  They are measured when the governance services are added. GMS ships with an empty `JAVA_OPTS`,
-  so it also gets the 25% default, about 3.9 GiB in this VM.
+  database. Its memory, measured with the lakehouse services, is in
+  [lakehouse.md](lakehouse.md#services-profile-batch). The image sets no heap, so the JVM default
+  applies: a maximum heap of 25% of the memory it can see.
+- **DataHub** GMS, frontend and upgrade need OpenSearch, Kafka and Postgres configured. Their
+  memory, measured with the governance services, is in [datahub.md](datahub.md#services-profile-gov).
+  GMS ships with an empty `JAVA_OPTS`, so it also gets the 25% default, about 3.9 GiB in this VM.
 
 Idle memory is a floor, not the budget. Everything above adds up to about 5 GiB, but under load
 each JVM grows toward its default limit, and several of those limits are sized from the whole
@@ -154,8 +155,8 @@ of each set of profiles that must run together is measured with `docker stats` a
 
 This was the one real arm64 risk. PyPI has no Linux arm64 wheel for `apache-flink`, so installing
 PyFlink in the Flink image builds it from source. The test below ran on 2026-10-23 as a throwaway
-two-stage build. Its Dockerfile is not in the repo: the Flink image is added with the streaming
-services.
+two-stage build. Its Dockerfile is not in the repo; the Flink image now follows the same recipe in
+`infra/flink/Dockerfile`.
 
 | Package | arm64 wheel on PyPI? | What `pip wheel` does |
 |---|---|---|

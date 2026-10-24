@@ -3,7 +3,8 @@
 DP3 normally recomputes every feature row from the full gold facts. With Delta Lake's Change Data
 Feed (CDF), a technique the EDAI course does not teach, DP3 instead reads just the fact rows that
 changed since its last run, finds the couriers, hubs and zones they touch, and recomputes and
-merges only those feature rows. A full recompute proves the result is identical.
+merges only those feature rows. For changes in the facts, a full recompute proves the result is
+identical; the limits below say which changes the feed does not see.
 
 ## What the Change Data Feed is
 
@@ -97,3 +98,11 @@ of the facts, while a full recompute reads all of them.
   it is the same rows in a daily run, where the change is near the end anyway.
 - **A rebuild resets the feed.** Rewriting a fact (`--rebuild`) records every row as changed, so
   the next incremental run recomputes everything. That is correct, just not cheaper.
+- **A new dimension key waits for a fact.** The incremental run follows only the facts' Change
+  Data Feed, but the courier and zone grids also come from `dim_courier` and `dim_zone`. A key
+  that arrives without fact rows is not added until a fact names it. Then its rows from that
+  fact's date on are merged, and its earlier rows are never written. Two cases: a courier hired
+  on a day with no orders or pings for that courier loses the row of the hire day, and a new drop
+  zone loses its rows before its first delivery. `jobs/check_cdf.py` would report these rows as
+  only in the full recompute. The proofs above rebuilt only the facts, so they did not test this
+  case.

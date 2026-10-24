@@ -1,5 +1,6 @@
 # Airflow 2.10.5 (Python 3.10) with a Spark client identical to the cluster's, built the simple way:
-# everything copied and installed in one image, nothing removed. A multi-stage rewrite comes later.
+# everything copied and installed in one image, nothing removed. Kept as the size baseline for the
+# multi-stage Dockerfile; see docs/environment.md (Built images: naive against multi-stage).
 #   Spark client        the cluster image's Java 17 and /opt/spark (every lakehouse jar), so the drivers
 #                       Airflow starts (client mode) match the executors exactly
 #   /opt/driver-python  the Spark drivers' Python, a virtual environment with Great Expectations 0.18,

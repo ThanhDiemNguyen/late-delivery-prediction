@@ -15,8 +15,8 @@ checks on 2026-10-23).
 
 | Source system | Dataset | Rows | Size | Files |
 |---|---|---:|---:|---:|
-| Postgres `oms` | `orders` | 80,800,000 | 14 GB + 2.8 GB of indexes | |
-| Postgres `oms` | `customers` | 5,000,000 | 0.44 GB + 0.25 GB of indexes | |
+| Postgres `oms` | `orders` | 80,800,000 | 18.14 GB with its indexes | |
+| Postgres `oms` | `customers` | 5,000,000 | 0.73 GB with its indexes | |
 | Postgres `oms` | `couriers`, `courier_changes`, `hubs` | 20,000, 104,192, 40 | 0.02 GB | |
 | Postgres `oms` | the whole database (`pg_database_size`) | | **18.89 GB** | |
 | SeaweedFS `app-exports` | `courier_pings` | 4,888,196,724 (18.2 B/row) | **88.82 GB** | 12,920 |

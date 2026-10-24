@@ -60,7 +60,7 @@ default. The init script runs only on the first start of an empty volume.
 |---|---:|---|
 | `parcel-scans` | 3 | live parcel-scan events |
 | `parcel-scans-replay` | 1 | exact replays for Flink checks (one partition keeps the watermark simple) |
-| `hub-delivery-5m` | 3 | Flink output: on-time counts per hub every 5 minutes |
+| `hub-delivery-5m` | 3 | Flink output: scans, delivered and late-delivered counts per hub and 5-minute window |
 | `scans-late` | 1 | Flink side output: scans that arrive after the lateness limit |
 
 ## Verification (2026-10-22)

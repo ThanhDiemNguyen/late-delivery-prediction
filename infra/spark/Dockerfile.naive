@@ -1,5 +1,6 @@
 # Spark 3.5.9 with the lakehouse jars, built the simple way: one stage, jars downloaded at build
-# time. A multi-stage rewrite and its size comparison come later; see docs/lakehouse.md.
+# time. Kept as the size baseline for the multi-stage Dockerfile; see docs/lakehouse.md and
+# docs/environment.md (Built images: naive against multi-stage).
 #   delta-spark + delta-storage 3.3.3   Delta Lake tables (delta-spark 3.3.x supports Spark 3.5)
 #   hadoop-aws 3.3.4 + AWS SDK 1.12.262 S3A access to SeaweedFS (matches Spark's Hadoop 3.3.4)
 #   postgresql 42.7.7                   JDBC reads of oms and writes to dwh

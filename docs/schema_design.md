@@ -1,10 +1,12 @@
 # Schema design: the tables of every zone and how they relate
 
-Data moves through five zones. Each zone below has three parts:
+Data moves through five zones. Each zone below has:
 
 - what every table is for;
-- a relationship diagram drawn from the live catalog;
-- the zone in DataHub.
+- the zone in DataHub (for the source, its `oms` tables).
+
+The four platform zones (bronze, silver, gold and dwh) also have a relationship diagram drawn
+from the live catalog. The source has none.
 
 Columns and their rules are in [pipelines.md](pipelines.md).
 
@@ -14,8 +16,8 @@ oms (Postgres) + app-exports (SeaweedFS)  ->  bronze raw_*  ->  silver stg_*  ->
 ```
 
 **How the diagrams are made.** `scripts/schema_catalog.py --er-diagrams` reads the columns from
-Trino (catalog `delta`) and from Postgres (`dwh`), and renders one Graphviz diagram per zone into
-`docs/images/schema/`. Each table shows its key columns, and the count of the others.
+Trino (catalog `delta`) and from Postgres (`dwh`), and renders one Graphviz diagram per platform
+zone into `docs/images/schema/`. Each table shows its key columns, and the count of the others.
 
 - **`dwh`:** the edges are the declared foreign keys, and primary keys are in bold.
 - **Delta tables** declare no keys, so the edges are the logical model in the script. Before
@@ -104,7 +106,7 @@ Silver is clean, typed and deduplicated: one current row per key.
 | `dim_date` | a local date of the period | weekday, ISO week, peak weeks, US holidays |
 | `dim_zone` | an H3 cell (resolution 7) with a customer's home | drop zones from Apache Sedona ([novel_h3_sedona.md](novel_h3_sedona.md)) |
 | `fact_delivery` | an order | the label `is_late`, `delivery_min` and `promised_min`; `courier_sk` is the courier version valid at pickup |
-| `fact_courier_activity_hourly` | a courier in a local hour | pings, km moved, idle minutes, speed on trips, trips |
+| `fact_courier_activity_hourly` | a courier in a local hour | pings, km moved, idle minutes, minutes on late trips, speed on trips, trips |
 | `feat_courier_daily` | a courier on a local day | `on_time_rate_30d`, `deliveries_7d`, `avg_speed_kmh_7d` |
 | `feat_hub_hourly` | a hub in an hour | `orders_1h`, `late_rate_7d`, `active_couriers_1h` |
 | `feat_zone_daily` | a drop zone on a local day | `deliveries_30d`, `late_rate_30d` |

@@ -16,7 +16,7 @@ whole path works, and Trino.
 | Service | Image | Role | Port on the Mac | Memory |
 |---|---|---|---|---|
 | `hive-metastore` | `starburstdata/hive:3.1.2-e.18` | table catalog over Thrift; its schema lives in the Postgres database `metastore`. Also in profile `query`, for Trino | `127.0.0.1:9083` | heap 512 MB, 699 MiB in use |
-| `spark-master` | `lastleg/spark:3.5.9-naive` | standalone master; jobs are submitted inside this container, so their driver runs here | `127.0.0.1:8080` (master UI), `:4040` (running job UI) | daemon 512 MB, 272 MiB in use |
+| `spark-master` | `lastleg/spark:3.5.9` | standalone master; jobs are submitted inside this container, so their driver runs here | `127.0.0.1:8080` (master UI), `:4040` (running job UI) | daemon 512 MB, 272 MiB in use |
 | `spark-worker` | same | runs executors: 4 cores and 4 GB for the dev slice (`SPARK_WORKER_CORES`, `SPARK_WORKER_MEMORY`) | `127.0.0.1:8081` | daemon 512 MB; executors 2 GB each |
 | `spark-history` | same | the Spark UI of finished jobs, from the event logs in the `spark_events` volume | `127.0.0.1:18080` | daemon 512 MB, 272 MiB in use |
 

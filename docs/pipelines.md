@@ -1,13 +1,13 @@
 # Pipelines: DP1, DP2 and DP3
 
-The platform's three data pipelines are Spark jobs in `jobs/`. Airflow runs them later. Each job
-starts through `jobs/common.py`, which stops with a clear message if the Spark settings
-(`infra/spark/conf/spark-defaults.conf`) were not loaded.
+The platform's three data pipelines are Spark jobs in `jobs/`. Airflow runs them as three DAGs
+([airflow.md](airflow.md)). Each job starts through `jobs/common.py`, which stops with a clear
+message if the Spark settings (`infra/spark/conf/spark-defaults.conf`) were not loaded.
 
 | Pipeline | From | To | Jobs |
 |---|---|---|---|
 | DP1 | the source systems (`oms`, `app-exports`) | bronze `raw_*` | `dp1_ingest.py` |
-| DP2 | bronze | silver `stg_*`, gold `dim_*` / `fact_*`, warehouse `dwh` | `dp2_silver.py`, then later jobs |
+| DP2 | bronze | silver `stg_*`, gold `dim_*` / `fact_*`, warehouse `dwh` | `dp2_silver.py`, `dp2_gold_dims.py`, `dp2_gold_facts.py`, `dp2_warehouse.py` |
 | DP3 | gold | feature tables `feat_*` | `dp3_features.py` |
 
 ## DP1: ingest into bronze (`jobs/dp1_ingest.py`)
@@ -126,8 +126,8 @@ data is what the sources promise. It does not check that the data is clean.
 document with every expectation, its outcome and the observed counts.
 
 - **Exit code:** with `--fail-on-error` the job exits 1 when any expectation fails.
-- **In Airflow:** without the flag it exits 0, so the next task can publish the results to DataHub
-  before stopping the pipeline.
+- **In Airflow:** the DAGs pass `--fail-on-error`, so a failed expectation fails the validate task.
+  Their `publish_assertions` task (trigger rule `all_done`) still sends the results to DataHub.
 - **`--corrupt`:** validates a corrupted copy of the same slice. It changes nothing in the
   lakehouse.
 
@@ -361,17 +361,19 @@ should never see a half-loaded warehouse. So the job loads in three steps:
 
 1. **Apply the DDL.** `CREATE TABLE IF NOT EXISTS`, with the keys.
 2. **Write staging.** Each table's rows go to `staging.<table>` with Spark JDBC.
-3. **Swap in one transaction.** It empties all six tables together, inserts dimensions before facts
+3. **Swap in one transaction.** It empties all seven tables together, inserts dimensions before facts
    (so Postgres checks every foreign key on every row), and drops `staging`. A failure rolls the
    whole swap back.
 
 ### Checks on the dev slice (2026-10-23)
 
+These checks ran before `dim_zone` was added to the warehouse, so they show six tables.
+
 | Check | Result |
 |---|---|
 | backup before the first load | `pg_dump` of the empty `dwh` |
 | rows | `dim_date` 184, `dim_hub` 40, `dim_customer` 50,000, `dim_courier` 799, `fact_delivery` 408,000 (2024-09-02 to 2024-11-30), `obt_delivery` 168,000 (2024-11-01 to 2024-11-30) |
-| declared keys (`information_schema`) | 6 primary keys; 6 foreign keys: `fact_delivery` → `dim_courier`, `dim_customer`, `dim_date`, `dim_hub`; `dim_courier` → `dim_hub`; `dim_customer` → `dim_hub` |
+| declared keys (`information_schema`) | 6 primary keys; 6 foreign keys: `fact_delivery` → `dim_courier`, `dim_customer`, `dim_date`, `dim_hub`; `dim_courier` → `dim_hub`; `dim_customer` → `dim_hub`. With `dim_zone`: 7 primary keys and 8 foreign keys, adding `dim_zone` → `dim_hub` and `fact_delivery` → `dim_zone` ([schema_design.md](schema_design.md#warehouse-dwh-postgres-written-by-dp2)) |
 | `staging` after the load | dropped; only `public` remains |
 | time | 30 s; a reload gives the same counts (33 s) |
 
@@ -389,7 +391,7 @@ The fact row counts can be checked by hand:
 | Database | `dwh` |
 | User and password | from `.env` |
 
-The ER diagram of `public` then shows the six foreign keys.
+The ER diagram of `public` then shows the eight foreign keys.
 
 ## DP2: validate silver and gold (`jobs/validate.py --suite dp2`)
 
@@ -407,19 +409,26 @@ clean, consistent and fully joined. It reads day `ds` of each table:
 | `silver.stg_parcel_scans` | rows exist; unique `scan_id` |
 | `gold.dim_courier` | unique `courier_sk`; no NULL attributes; `valid_to_ts > valid_from_ts` (the full SCD2 invariants are in `jobs/check_dim_courier.py`) |
 | `gold.fact_delivery` | rows exist; unique `order_id`; no NULL key, label or measure; delivery 10 to 1,000 min; promised 120 to 300 min |
-| `gold.fact_delivery` joined to its four dimensions | every key finds its dimension row (foreign-key coverage) |
+| `gold.fact_delivery` joined to its five dimensions (`dim_zone` included) | every key finds its dimension row (foreign-key coverage) |
 | `gold.fact_delivery` labels | the day's late share is between 8% and 30% |
-| `gold.fact_courier_activity_hourly` | rows exist; `(courier_id, hour_start)` unique; 1 to 144 pings, 0 to 60 idle minutes and 0 to 120 km per hour |
+| `gold.fact_courier_activity_hourly` | rows exist; `(courier_id, hour_start)` unique; 1 to 144 pings, 0 to 60 idle minutes, 0 to 60 late-trip minutes (`late_trip_min`) and 0 to 120 km per hour |
 
 The two joined or derived datasets are built in the job (`DERIVED` in `jobs/validate.py`) and then
 checked like tables. That is how a single-table expectation library checks foreign keys.
 
 ### Checks on the dev slice (2026-10-23)
 
+These two runs came before two checks were added, so the suite then had 60 expectations.
+
 | Day | Result | Exit code |
 |---|---|---|
 | 2024-09-07 (v1 and v2 pings) | 60 of 60 expectations passed (35 s) | 0 |
 | 2024-11-29 (Black Friday, 3× orders) | 60 of 60 passed (43 s) | 0 |
+
+The H3 zones added the `dim_zone` coverage check (61 expectations). On 2026-10-23 the DP2 DAG run
+for 2024-11-30 passed 61 of 61 ([airflow.md](airflow.md#dp2-dp2_transform_validate)). The
+`late_trip_min` range came next (62). On 2026-10-24 the DAG run for 2024-11-29 passed 62 of 62
+([airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24)).
 
 The DP1 suite still passes 73 of 73 on 2024-09-07 after the change.
 
@@ -448,16 +457,17 @@ the row's `event_timestamp`. The model's training join (in EDAI-2) takes, for ea
 latest feature row with `event_timestamp <= pickup_ts`. That join therefore never sees the order
 being scored or anything after it.
 
-**The grid.** Each table is built on a full grid: every courier from its hiring day, and every
-hub for every hour of the period. Days and hours with no activity are present, with 0 or NULL
-values, and the rolling windows (`rangeBetween` over a day or hour number) never skip a gap.
+**The grid.** Each table is built on a full grid: every courier from its hiring day, every hub
+for every hour of the period, and every zone for every day. Days and hours with no activity are
+present, with 0 or NULL values, and the rolling windows (`rangeBetween` over a day or hour number)
+never skip a gap.
 
 ### Checks on the dev slice (2026-10-23)
 
 | Check | Result |
 |---|---|
-| rows | `feat_courier_daily` 33,836 (couriers × days since hiring); `feat_hub_hourly` 175,760 = 40 hubs × 4,394 hours (183 days × 24, plus the closing hour, plus the extra hour when daylight saving ends) |
-| `DESCRIBE` | both tables have `event_timestamp timestamp` and `created timestamp` |
+| rows | `feat_courier_daily` 33,836 (couriers × days since hiring); `feat_hub_hourly` 175,760 = 40 hubs × 4,394 hours (183 days × 24, plus the closing hour, plus the extra hour when daylight saving ends); `feat_zone_daily` 275,448 = 1,497 zones × 184 days ([novel_h3_sedona.md](novel_h3_sedona.md)) |
+| `DESCRIBE` | all three tables have `event_timestamp timestamp` and `created timestamp` |
 | 300 sampled `feat_courier_daily` rows, recomputed directly from `fact_delivery` | 0 mismatches; 0 deliveries at or after `event_timestamp` counted |
 | 300 sampled `feat_hub_hourly` rows, recomputed from deliveries in the 168 hours before `event_timestamp` | 0 mismatches |
 | example | courier 146 on 2024-11-29: on time 93.4% over 30 days, 300 deliveries in 7 days (Black Friday week), 25.1 km/h; `event_timestamp` 2024-11-30 08:00 UTC |
@@ -472,15 +482,21 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.
 
 | Dataset (day `ds`) | Expectations |
 |---|---|
-| `gold.feat_courier_daily` | rows exist; `(courier_id, feature_date)` unique; no NULL key, `deliveries_7d`, `event_timestamp` or `created`; on-time rate 0 to 1; speed 0 to 80 km/h; `created >= event_timestamp` (a row is computed only after its day has ended) |
-| `gold.feat_hub_hourly` | 960 to 1,000 rows (40 hubs × 24 hours, or 25 when daylight saving time ends); `(hub_id, hour_start)` unique; no NULL key, counts or time columns; late rate 0 to 1; `event_timestamp > hour_start`; `created >= event_timestamp` |
+| `gold.feat_courier_daily` | rows exist; `(courier_id, feature_date)` unique; no NULL key, `deliveries_7d`, `event_timestamp` or `created`; on-time rate 0 to 1; speed 0 to 80 km/h; 0 to 2,000 deliveries in 7 days; `created >= event_timestamp` (a row is computed only after its day has ended) |
+| `gold.feat_zone_daily` | rows exist; `(zone_id, feature_date)` unique; no NULL `zone_id`, `deliveries_30d`, `event_timestamp` or `created`; late rate 0 to 1; `created >= event_timestamp` |
+| `gold.feat_hub_hourly` | 960 to 1,000 rows (40 hubs × 24 hours, or 25 when daylight saving time ends); `(hub_id, hour_start)` unique; no NULL key, counts or time columns; late rate 0 to 1; `orders_1h >= 0`; `event_timestamp > hour_start`; `created >= event_timestamp` |
 
 ### Checks on the dev slice (2026-10-23)
+
+These two runs came before `feat_zone_daily` was added, so the suite then had 23 expectations.
 
 | Day | Result | Exit code |
 |---|---|---|
 | 2024-09-07 | 23 of 23 expectations passed | 0 |
 | 2024-11-03 (daylight saving time ends: 25 local hours) | 23 of 23 passed | 0 |
+
+With `feat_zone_daily` the suite has 31 expectations. On 2026-10-24 the DP3 DAG run for
+2024-11-29 passed 31 of 31 ([airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24)).
 
 ### DP2 pitfalls
 

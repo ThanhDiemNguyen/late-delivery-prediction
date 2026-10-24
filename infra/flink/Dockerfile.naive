@@ -1,6 +1,6 @@
 # Flink 1.20.5 with PyFlink and the Kafka connector, built the simple way: one stage that compiles
-# PyFlink and keeps the compilers. A multi-stage rewrite and its size comparison come later; see
-# docs/environment.md (PyFlink on arm64).
+# PyFlink and keeps the compilers. Kept as the size baseline for the multi-stage Dockerfile; see
+# docs/environment.md (Built images: naive against multi-stage, and PyFlink on arm64).
 #   apache-flink 1.20.5               PyFlink; PyPI has no arm64 wheel, so pip builds it from source
 #   libpython3.10                     the shared Python library that thread mode (pemja) loads
 #   flink-sql-connector-kafka 3.4.0   KafkaSource and KafkaSink for Flink 1.20
