@@ -81,8 +81,14 @@ The installed versions were checked inside the image:
 - The driver Python imports Great Expectations 0.18.19, Sedona, h3 4.5.0, delta and PySpark 3.5.9
   (from `SPARK_HOME`).
 
-Screenshots to add from the UI (Admin → Connections, Admin → Variables, Admin → Pools) are listed
-in the project checklist. They show the same entries; the UI masks the passwords.
+The UI shows the same entries (Admin → Connections, Variables, Pools). The connection list has no
+login or password column, and the variables hold no secret:
+
+![Airflow connections](images/airflow/connections.png)
+
+![Airflow variables](images/airflow/variables.png)
+
+![Airflow pools](images/airflow/pools.png)
 
 ## DAGs
 
@@ -96,6 +102,8 @@ The DAGs build their Spark tasks with one factory, `airflow/dags/lakehouse_tasks
 
 The DAGs run from 2024-06-01 to 2024-12-01. The extra last day loads the parcels ordered on
 2024-11-30 and delivered after midnight: their order update and their scans belong to 2024-12-01.
+
+![The three DAGs](images/airflow/dags.png)
 
 ### DP1: `dp1_ingest_validate`
 
@@ -121,6 +129,12 @@ the sources still hold them.) Then three runs were triggered:
 After the runs, bronze equals the sources again: 808,000 orders, 49,350,264 pings, 2,424,000
 scans, 200 couriers, 1,093 courier changes and 50,000 customers. The 5.7 MB of task logs contain
 neither the Postgres password nor the S3 secret key.
+
+The grid holds DP1's six runs, all green. The graph shows the run for 2024-12-01:
+
+![DP1 grid](images/airflow/dp1_ingest_validate-grid.png)
+
+![DP1 graph, run 2024-12-01](images/airflow/dp1_ingest_validate-graph.png)
 
 ### DP2: `dp2_transform_validate`
 
@@ -152,6 +166,10 @@ The scheduler looks for new DAG files every 300 s by default, and the run starte
 file was added. `AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL` is now 30 s. After clearing the task,
 the run passed.
 
+![DP2 grid](images/airflow/dp2_transform_validate-grid.png)
+
+![DP2 graph, run 2024-12-01](images/airflow/dp2_transform_validate-graph.png)
+
 ### DP3: `dp3_features_validate`
 
 DP3 has no schedule either. `dp2_transform_validate` starts it for the same day once both of its
@@ -165,6 +183,10 @@ validate_suite >> publish_assertions (the suite's results to DataHub, trigger ru
 
 `validate_incremental` compares every incrementally maintained feature table with a full
 recompute, so each run also checks novel idea 2 ([novel_cdf_incremental.md](novel_cdf_incremental.md)).
+
+![DP3 grid](images/airflow/dp3_features_validate-grid.png)
+
+![DP3 graph, run 2024-12-01](images/airflow/dp3_features_validate-graph.png)
 
 ### The whole chain
 
@@ -205,6 +227,19 @@ The failed `validate_bronze` still wrote its results
 (`s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json`) before the run stopped, and
 `publish_assertions` sends them to DataHub even when the suite fails
 ([datahub.md](datahub.md#data-validation-great-expectations-results-as-assertions)).
+
+`validate_bronze` for 2024-12-01 keeps every try. Try 1 failed before the period-end rule existed;
+tries 3 and 5 are the two drills, and each repair after them passed (tries 4 and 6):
+
+![validate_bronze tries for 2024-12-01](images/airflow/drill-validate-bronze-failed-try.png)
+
+The log of try 5 holds the two failed expectations:
+
+```text
+FAIL bronze.raw_orders expect_column_values_to_be_in_set {'column': 'traffic'} observed {'element_count': 2619, 'unexpected_count': 100, 'unexpected_percent': 3.8182512409316534}
+FAIL bronze.raw_orders expect_column_values_to_be_in_set {'column': 'status'} observed {'element_count': 2619, 'unexpected_count': 100, 'unexpected_percent': 3.8182512409316534}
+suite dp1 ds 2024-12-01: 43 of 45 expectations passed; results in s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json; skipped after the period: ['bronze.raw_courier_pings']
+```
 
 ## Pitfalls
 

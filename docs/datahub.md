@@ -79,6 +79,22 @@ A GraphQL search on GMS (`searchAcrossEntities`) lists the datasets by platform 
 | trino | gold | 10 |
 | postgres | `dwh` | 7 |
 
+Every zone in the UI, one schema per zone:
+
+![Source oms](images/datahub/zone-oms.png)
+
+![Bronze](images/datahub/zone-bronze.png)
+
+![Silver](images/datahub/zone-silver.png)
+
+![Gold](images/datahub/zone-gold.png)
+
+![Warehouse dwh](images/datahub/zone-dwh.png)
+
+The schema of a table, here `delta.gold.fact_delivery`:
+
+![Schema of gold.fact_delivery](images/datahub/schema-gold-fact-delivery.png)
+
 ## Lineage from Airflow
 
 The DataHub Airflow plugin (`acryl-datahub-airflow-plugin` 1.5.0.17, in the Airflow image) sends
@@ -123,6 +139,35 @@ green. Then a GraphQL query on GMS returned:
 - An upstream lineage search from `dwh.public.fact_delivery` that reaches every zone back to
   the sources: 6 gold, 5 silver, 7 bronze, the 5 `oms` tables and the 2 app exports. The silver
   table that does not appear is `stg_parcel_scans`, because no gold job reads it.
+
+Each pipeline in the UI, with its tasks:
+
+![DP1 pipeline](images/datahub/pipeline-dp1.png)
+
+![DP2 pipeline](images/datahub/pipeline-dp2.png)
+
+![DP3 pipeline](images/datahub/pipeline-dp3.png)
+
+The lineage of the tasks that write each zone. DP1's `ingest_bronze` reads the `oms` tables and the
+two app exports and writes bronze:
+
+![DP1 ingest_bronze lineage](images/datahub/task-dp1-ingest-bronze.png)
+
+DP2's `silver`, `gold_facts` and `warehouse`:
+
+![DP2 silver lineage](images/datahub/task-dp2-silver.png)
+
+![DP2 gold_facts lineage](images/datahub/task-dp2-gold-facts.png)
+
+![DP2 warehouse lineage](images/datahub/task-dp2-warehouse.png)
+
+DP3's `features`:
+
+![DP3 features lineage](images/datahub/task-dp3-features.png)
+
+The upstream lineage of `dwh.public.fact_delivery`, through the Airflow tasks back to bronze:
+
+![Lineage of dwh.public.fact_delivery](images/datahub/lineage-dwh-fact-delivery.png)
 
 ## Data validation: Great Expectations results as assertions
 
@@ -186,8 +231,19 @@ checks without Great Expectations. They stop the chain when they fail but are no
   2024-12-01, and the tasks sent 45, 30 and 19 assertions with none failed (the after-period slices
   are skipped on that day). The two assertions now show three runs: pass, fail, pass.
 
-Screenshots of a dataset's Quality tab (for example `delta.bronze.raw_orders`) go with this
-document.
+One dataset per pipeline in the UI. DP1, `delta.bronze.raw_orders`: 12 assertions, all passing
+since the repair. The history of "traffic takes only allowed values" shows the drill: passing on
+2024-11-27, failing at the drill, passing after the repair.
+
+![Quality tab of bronze.raw_orders](images/datahub/quality-bronze-raw-orders.png)
+
+![History of the traffic assertion](images/datahub/quality-bronze-raw-orders-traffic.png)
+
+DP2, `delta.silver.stg_orders`, and DP3, `delta.gold.feat_courier_daily`:
+
+![Quality tab of silver.stg_orders](images/datahub/quality-silver-stg-orders.png)
+
+![Quality tab of gold.feat_courier_daily](images/datahub/quality-gold-feat-courier-daily.png)
 
 ## Pitfalls
 

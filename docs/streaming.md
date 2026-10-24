@@ -332,8 +332,17 @@ replay, the whole week takes 85 s, so no flag expires during a run. On a live st
 time and event time move together. The TTL then bounds the state to about 15 minutes of scans,
 against a retry gap of 10 s at most.
 
-Flink UI screenshots go with this document: the job list with the three modes and the job graph
-of the dedup run, at `http://127.0.0.1:8084`.
+The Flink UI (`http://127.0.0.1:8084`): the finished jobs, then the job graph of one run per mode.
+The short baseline jobs are the smoke runs. In the dedup graph, `KEYED PROCESS` receives 84,712
+records and sends 83,460.
+
+![Flink completed jobs](images/streaming/flink-completed-jobs.png)
+
+![Baseline job](images/streaming/flink-job-baseline.png)
+
+![Lateness job](images/streaming/flink-job-lateness.png)
+
+![Dedup job](images/streaming/flink-job-dedup.png)
 
 ## Pitfalls
 
