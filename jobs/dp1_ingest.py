@@ -21,10 +21,9 @@ import os
 
 from pyspark.sql import DataFrame, SparkSession, functions as F
 
-from common import lakehouse_session
+from common import EXPORTS, LAKEHOUSE, lakehouse_session
 
-BRONZE = "s3a://lakehouse/bronze"
-EXPORTS = "s3a://app-exports"
+BRONZE = f"{LAKEHOUSE}/bronze"
 OMS_URL = os.environ.get("OMS_JDBC_URL", "jdbc:postgresql://postgres:5432/oms")
 # Each oms table and the column that tells which rows changed since the last run.
 OMS_TABLES = {

@@ -2,14 +2,20 @@
 
 stage_metrics reads the job's own stages back from the Spark UI's REST API, so a benchmark can
 report task times, shuffle and spill next to its result.
+
+LAKEHOUSE and EXPORTS are the two buckets. Airflow passes their names from its variables
+lakehouse_bucket and exports_bucket; a job started by hand gets the same names by default.
 """
 
 import json
+import os
 from urllib.request import urlopen
 
 from pyspark.sql import SparkSession
 
 REQUIRED = ("spark.hadoop.fs.s3a.endpoint", "spark.hadoop.hive.metastore.uris", "spark.sql.extensions")
+LAKEHOUSE = "s3a://" + os.environ.get("LAKEHOUSE_BUCKET", "lakehouse")
+EXPORTS = "s3a://" + os.environ.get("EXPORTS_BUCKET", "app-exports")
 
 
 def lakehouse_session(app_name: str) -> SparkSession:

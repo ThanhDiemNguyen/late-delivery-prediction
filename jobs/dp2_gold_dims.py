@@ -21,9 +21,9 @@ from datetime import date, timedelta
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
-from common import lakehouse_session, with_sedona
+from common import LAKEHOUSE, lakehouse_session, with_sedona
 
-GOLD = "s3a://lakehouse/gold"
+GOLD = f"{LAKEHOUSE}/gold"
 H3_RESOLUTION = 7
 LA = "America/Los_Angeles"
 TRACKED = ["home_hub_id", "vehicle_type", "rating", "employment_type"]

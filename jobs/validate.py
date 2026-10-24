@@ -8,8 +8,8 @@ the oms rows changed on local day ds, and the silver and gold rows of day ds. So
 grow with the table. DP1 checks that bronze is what the sources promise (dirty values included);
 DP2 checks that silver and gold are clean, consistent and fully joined. The results
 go to s3a://lakehouse/_validation/<suite>/ds=<ds>/results.json. With --fail-on-error the job exits 1
-when any expectation fails; without it the job exits 0 once the checks ran, so the next task can
-publish the results before stopping the pipeline.
+when any expectation fails; without it the job exits 0 once the checks ran. The DAGs pass the flag,
+and their publish_assertions task (trigger rule all_done) still sends a failed run's results to DataHub.
 
 GE 0.18 legacy API (SparkDFDataset): every expectation runs as a Spark query on the executors.
 """
@@ -22,9 +22,9 @@ from datetime import datetime, timezone
 from great_expectations.dataset import SparkDFDataset
 from pyspark.sql import DataFrame, SparkSession, functions as F
 
-from common import lakehouse_session
+from common import LAKEHOUSE, lakehouse_session
 
-OUT = "s3a://lakehouse/_validation"
+OUT = f"{LAKEHOUSE}/_validation"
 LA = "America/Los_Angeles"
 LAT, LON = (33.70, 34.82), (-118.95, -117.65)
 LEGACY_TRAFFIC = ["Low ", "Medium ", "High ", "Jam ", "NaN "]
@@ -61,7 +61,7 @@ def date_key(ds):
 
 
 def fact_with_dimensions(spark: SparkSession, ds: str) -> DataFrame:
-    """Return day ds of fact_delivery left-joined to its four dimensions (NULL key = missing dimension row)."""
+    """Return day ds of fact_delivery left-joined to its five dimensions (NULL key = missing dimension row)."""
     fact = spark.table("gold.fact_delivery").where(date_key(ds))
     dims = {
         "dim_courier": ("courier_sk", "courier_sk"), "dim_hub": ("hub_id", "hub_id"),

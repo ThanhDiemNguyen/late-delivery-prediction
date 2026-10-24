@@ -21,9 +21,9 @@ import argparse
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
-from common import lakehouse_session
+from common import LAKEHOUSE, lakehouse_session
 
-SILVER = "s3a://lakehouse/silver"
+SILVER = f"{LAKEHOUSE}/silver"
 LA = "America/Los_Angeles"
 LAT, LON = (33.70, 34.82), (-118.95, -117.65)
 # The order system's promise rule (Operations): area base minutes + 3 minutes per km hub to drop.

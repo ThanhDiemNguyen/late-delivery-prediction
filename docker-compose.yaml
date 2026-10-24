@@ -295,8 +295,9 @@ services:
   # ---------- orch: Airflow (profile orch; runs on top of core and batch) ----------
 
   # One-shot: migrates the airflow database, creates the admin user, then the connections,
-  # variables and pool (airflow/setup_airflow.py). Only this container reads .env; the others get
-  # the credentials from Airflow's (Fernet-encrypted) connections.
+  # variables and pool (airflow/setup_airflow.py). Only this container reads .env. The webserver
+  # and scheduler get only the metadata database URL and the Fernet key; the DAGs get the source
+  # credentials from Airflow's (Fernet-encrypted) connections.
   airflow-init:
     build:
       context: ./infra/airflow

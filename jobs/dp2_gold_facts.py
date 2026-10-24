@@ -27,9 +27,9 @@ from delta.tables import DeltaTable
 
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
-from common import lakehouse_session, with_sedona
+from common import LAKEHOUSE, lakehouse_session, with_sedona
 
-GOLD = "s3a://lakehouse/gold"
+GOLD = f"{LAKEHOUSE}/gold"
 LA = "America/Los_Angeles"
 PING_INTERVAL_MIN = 25 / 60
 

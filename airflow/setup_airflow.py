@@ -39,7 +39,6 @@ VARIABLES = {
     "jobs_dir": "/opt/jobs",
     "lakehouse_bucket": "lakehouse",
     "exports_bucket": "app-exports",
-    "period_start": "2024-06-01",
     "period_end": "2024-11-30",
 }
 

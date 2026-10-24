@@ -16,10 +16,12 @@ check fails the run.
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from datahub_assertions import publish_assertions
-from lakehouse_tasks import DEFAULT_ARGS, EXPORTS, OMS_TABLES, PERIOD_START, lake, postgres, spark_job
+from lakehouse_tasks import DEFAULT_ARGS, DWH_ENV, EXPORTS, OMS_TABLES, PERIOD_START, lake, postgres, spark_job
 
-BRONZE = lake("bronze", *[f"raw_{t}" for t in OMS_TABLES + EXPORTS])
+# raw_couriers is not read: dim_courier is built from the courier changes.
+BRONZE = lake("bronze", *[f"raw_{t}" for t in OMS_TABLES + EXPORTS if t != "couriers"])
 SILVER = lake("silver", "stg_hubs", "stg_customers", "stg_courier_changes", "stg_orders", "stg_courier_pings", "stg_parcel_scans")
+CHECKED = lake("silver", "stg_orders", "stg_courier_pings", "stg_parcel_scans")
 DIMS = lake("gold", "dim_hub", "dim_customer", "dim_date", "dim_zone", "dim_courier")
 FACTS = lake("gold", "fact_delivery", "fact_courier_activity_hourly")
 DWH = postgres("dwh", "dim_date", "dim_hub", "dim_zone", "dim_customer", "dim_courier", "fact_delivery", "obt_delivery")
@@ -46,12 +48,12 @@ with DAG(
     )
     warehouse = spark_job(
         "warehouse", "dp2_warehouse.py", [],
-        inlets=DIMS + lake("gold", "fact_delivery"), outlets=DWH,
+        inlets=DIMS + lake("gold", "fact_delivery"), outlets=DWH, env=DWH_ENV,
     )
     suite = spark_job(
         "validate_suite", "validate.py",
         ["--suite", "dp2", "--ds", "{{ ds }}", "--period-end", "{{ var.value.period_end }}", "--fail-on-error"], retries=0,
-        inlets=SILVER + DIMS + FACTS,
+        inlets=CHECKED + DIMS + FACTS,
     )
     scd2 = spark_job(
         "validate_scd2", "check_dim_courier.py", [], retries=0,

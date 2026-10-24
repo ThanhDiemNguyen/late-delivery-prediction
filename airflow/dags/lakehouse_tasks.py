@@ -1,7 +1,8 @@
 """Shared task factory for the DP1 to DP3 DAGs: one Spark job submitted to the lakehouse cluster.
 
-Credentials come from Airflow connections at run time (templated env_vars), never from this code.
-The driver runs in the scheduler container (client mode); the executors run on spark-worker.
+Credentials, hosts and bucket names come from Airflow connections and variables at run time
+(templated env_vars), never from this code. The driver runs in the scheduler container (client
+mode); the executors run on spark-worker.
 """
 
 from datetime import datetime, timedelta
@@ -15,11 +16,20 @@ PERIOD_START, PERIOD_END = datetime(2024, 6, 1), datetime(2024, 12, 1)
 DEFAULT_ARGS = {"owner": "lastleg-data", "retries": 1, "retry_delay": timedelta(minutes=2)}
 
 SPARK_ENV = {
+    "OMS_JDBC_URL": "jdbc:postgresql://{{ conn.oms_postgres.host }}:{{ conn.oms_postgres.port }}/{{ conn.oms_postgres.schema }}",
     "POSTGRES_USER": "{{ conn.oms_postgres.login }}",
     "POSTGRES_PASSWORD": "{{ conn.oms_postgres.password }}",
+    "LAKEHOUSE_BUCKET": "{{ var.value.lakehouse_bucket }}",
+    "EXPORTS_BUCKET": "{{ var.value.exports_bucket }}",
     "AWS_ACCESS_KEY_ID": "{{ conn.lakehouse_s3.login }}",
     "AWS_SECRET_ACCESS_KEY": "{{ conn.lakehouse_s3.password }}",
     "PYSPARK_DRIVER_PYTHON": "/opt/driver-python/bin/python",
+}
+# The warehouse task writes to dwh with the dwh_postgres connection instead.
+DWH_ENV = {
+    "DWH_JDBC_URL": "jdbc:postgresql://{{ conn.dwh_postgres.host }}:{{ conn.dwh_postgres.port }}/{{ conn.dwh_postgres.schema }}",
+    "POSTGRES_USER": "{{ conn.dwh_postgres.login }}",
+    "POSTGRES_PASSWORD": "{{ conn.dwh_postgres.password }}",
 }
 SPARK_CONF = {
     "spark.driver.host": "airflow-scheduler",  # the executors connect back to the driver here
@@ -48,12 +58,12 @@ def exports(*datasets: str) -> list[Dataset]:
 
 def spark_job(
     task_id: str, job: str, args: list[str], retries: int | None = None,
-    inlets: list[Dataset] | None = None, outlets: list[Dataset] | None = None,
+    inlets: list[Dataset] | None = None, outlets: list[Dataset] | None = None, env: dict | None = None,
 ) -> SparkSubmitOperator:
     """Return a task that runs jobs/<job> with spark-submit in the one-slot spark pool.
 
     inlets and outlets are the datasets the job reads and writes; the DataHub plugin sends them as
-    the task's lineage.
+    the task's lineage. env adds to or replaces entries of SPARK_ENV for this task.
     """
     extra = {} if retries is None else {"retries": retries}
     return SparkSubmitOperator(
@@ -62,7 +72,7 @@ def spark_job(
         application="{{ var.value.jobs_dir }}/" + job,
         application_args=args,
         name=f"{task_id}_{{{{ ds_nodash }}}}",
-        env_vars=SPARK_ENV,
+        env_vars={**SPARK_ENV, **(env or {})},
         conf=SPARK_CONF,
         pool="spark",
         inlets=inlets or [],

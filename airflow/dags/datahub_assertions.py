@@ -11,6 +11,7 @@ from datetime import datetime
 
 from airflow.configuration import conf
 from airflow.exceptions import AirflowSkipException
+from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.utils.trigger_rule import TriggerRule
@@ -27,7 +28,7 @@ from datahub.metadata.schema_classes import (
 )
 from datahub_airflow_plugin.hooks.datahub import DatahubRestHook
 
-BUCKET, PREFIX = "lakehouse", "_validation"
+PREFIX = "_validation"
 PLATFORM = "great-expectations"
 
 # expectation -> (scope, aggregation, operator); a range operator is set from the kwargs.
@@ -144,9 +145,9 @@ def assertion_mcps(report: dict) -> list[MetadataChangeProposalWrapper]:
 
 def read_report(suite: str, ds: str) -> dict | None:
     """Return the report validate.py wrote for the suite and day, or None if there is none."""
-    s3 = S3Hook(aws_conn_id="lakehouse_s3")
-    keys = s3.list_keys(bucket_name=BUCKET, prefix=f"{PREFIX}/{suite}/ds={ds}/results.json/part-") or []
-    return json.loads(s3.read_key(keys[0], bucket_name=BUCKET)) if keys else None
+    s3, bucket = S3Hook(aws_conn_id="lakehouse_s3"), Variable.get("lakehouse_bucket")
+    keys = s3.list_keys(bucket_name=bucket, prefix=f"{PREFIX}/{suite}/ds={ds}/results.json/part-") or []
+    return json.loads(s3.read_key(keys[0], bucket_name=bucket)) if keys else None
 
 
 def publish(suite: str, validate_task_id: str, ds: str, dag_run, **_) -> None:

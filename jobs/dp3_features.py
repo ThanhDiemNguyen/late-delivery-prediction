@@ -28,9 +28,9 @@ from datetime import datetime, timezone
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
-from common import lakehouse_session
+from common import LAKEHOUSE, lakehouse_session
 
-GOLD = "s3a://lakehouse/gold"
+GOLD = f"{LAKEHOUSE}/gold"
 LA = "America/Los_Angeles"
 PING_INTERVAL_MIN = 25 / 60
 FACTS = ("fact_delivery", "fact_courier_activity_hourly")
