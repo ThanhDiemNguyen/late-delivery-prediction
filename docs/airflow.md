@@ -100,7 +100,7 @@ The DAGs run from 2024-06-01 to 2024-12-01. The extra last day loads the parcels
 ### DP1: `dp1_ingest_validate`
 
 ```text
-ingest_bronze (jobs/dp1_ingest.py --until {{ ds }})  >>  validate_bronze (jobs/validate.py --suite dp1 --ds {{ ds }} --period-end {{ var.value.period_end }} --fail-on-error)
+ingest_bronze (jobs/dp1_ingest.py --until {{ ds }})  >>  validate_bronze (jobs/validate.py --suite dp1 --ds {{ ds }} --period-end {{ var.value.period_end }} --fail-on-error)  >>  trigger_dp2
 ```
 
 `validate_bronze` fails the run when any expectation fails, so nothing after it runs on bad
@@ -120,6 +120,34 @@ the sources still hold them.) Then three runs were triggered:
 After the runs, bronze equals the sources again: 808,000 orders, 49,350,264 pings, 2,424,000
 scans, 200 couriers, 1,093 courier changes and 50,000 customers. The 5.7 MB of task logs contain
 neither the Postgres password nor the S3 secret key.
+
+### DP2: `dp2_transform_validate`
+
+DP2 has no schedule. `dp1_ingest_validate` starts it for the same logical date
+(`TriggerDagRunOperator`), and only after `validate_bronze` passed.
+
+```text
+ingest stage:   silver >> gold_dims >> gold_facts >> warehouse
+validate stage: >> [validate_suite (jobs/validate.py --suite dp2 --ds {{ ds }} ...), validate_scd2 (jobs/check_dim_courier.py)]
+```
+
+**Check on the dev slice (2026-10-23).** A run of `dp1_ingest_validate` for 2024-11-30 passed its
+three tasks and triggered `dp2_transform_validate` for the same day. All six DP2 tasks succeeded
+in 3.5 minutes:
+
+| Task | Time | Output |
+|---|---:|---|
+| `silver` | 38 s | `stg_orders` 808,000, `stg_courier_changes` 1,093, `stg_customers` 50,000; no new ping or scan export date |
+| `gold_dims` | 32 s | `dim_zone` 1,497, `dim_customer` 50,000; `dim_courier`: no new version after change 1093 |
+| `gold_facts` | 36 s | `fact_delivery` 808,000 (merged); no new activity hour |
+| `warehouse` | 38 s | `dwh` reloaded: `fact_delivery` 408,000, `obt_delivery` 168,000, the dimensions |
+| `validate_suite` | 46 s | 61 of 61 expectations passed |
+| `validate_scd2` | 23 s | 8 invariants, 0 violations: 799 versions from 1,093 audit rows |
+
+The first try of the DP1 run failed at `trigger_dp2` ("Dag id dp2_transform_validate not found").
+The scheduler looks for new DAG files every 300 s by default, and the run started seconds after the
+file was added. `AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL` is now 30 s. After clearing the task,
+the run passed.
 
 ## Pitfalls
 

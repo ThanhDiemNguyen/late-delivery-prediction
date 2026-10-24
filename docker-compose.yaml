@@ -278,6 +278,7 @@ services:
       AIRFLOW__WEBSERVER__WORKERS: "1"
       AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "600"
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"   # look for new DAG files every 30 s (default 300)
       AIRFLOW__DATAHUB__ENABLED: ${DATAHUB_ENABLED:-false}   # turned on when the governance profile exists
     command: >-
       bash -c "airflow db migrate >/dev/null && echo 'metadata database ready'
