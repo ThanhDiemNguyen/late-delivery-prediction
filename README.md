@@ -33,18 +33,40 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 
 ## Architecture
 
-![Deployment diagram](docs/images/architecture/deployment.png)
+### Overview
 
-Every box is a deployable unit: a container of one Compose profile, or a process run on the Mac.
-Arrows follow the data and carry it as their label. Each flow has its own colour and numbering,
-and the two dashed arrows are calls that carry no data. The source is
-[`docs/images/architecture/deployment.dot`](docs/images/architecture/deployment.dot) (Graphviz).
+![Overview: the batch steps DP1 to DP3 each write a lakehouse zone (bronze, silver, gold, features) that the next step reads, the warehouse load fills dwh, Trino serves every zone; below them the scan stream through Kafka and Flink, and the Airflow, DataHub and storage services; the two novel ideas in red](docs/images/architecture/overview.png)
+
+Each batch step writes one zone of the lakehouse, and the next step reads it from there. DP1
+copies the sources into bronze, DP2 builds silver, gold and the `dwh` warehouse, and DP3 builds
+the `feat_` tables. The stream counts the deliveries per hub in 5-minute windows. The two novel
+ideas are in red: the H3 delivery zones from Apache Sedona, and the incremental DP3 from Delta's
+Change Data Feed.
+
+### System diagram
+
+![System architecture: every deployable unit of the platform in its Compose profile or on the Mac, and the numbered data flows between them](docs/images/architecture/system.png)
+
+Every box is a deployable unit: a container of one Compose profile (its tag) or a process on the
+Mac. Each arrow carries the data named on it, from the unit that sends the data to the unit that
+receives it. B1 and S2 carry no data: they point from the caller to the unit it calls. Each flow
+has its own colour and its own numbers, and two arrows cross only where the line shows a gap.
+The dashed boxes are support units whose arrows are left out: the Airflow webserver (it reads the
+`airflow` database) and OpenSearch (DataHub's search index).
+
+Both pictures are drawn by [`docs/diagrams/draw.py`](docs/diagrams/draw.py) (stdlib Python; PNG
+through headless Chrome) from two sources each: the topology in [`system.json`](docs/diagrams/system.json)
+and [`overview.json`](docs/diagrams/overview.json), in the typed architecture IR of the ak-diagram
+tool, and the coordinates in [`system_layout.py`](docs/diagrams/system_layout.py) and
+[`overview_layout.py`](docs/diagrams/overview_layout.py). The script refuses a layout in which an
+arrow crosses a box or a label overlaps a box, a line or another label.
 
 | Flow | Colour | What moves |
 |---|---|---|
-| Batch, B1 to B12 | blue | The generator fills the sources, `oms` and `app-exports` (B1, B2). Airflow submits DP1 to DP3 to Spark (B3). DP1 copies changed rows and new export dates into bronze (B4, B5). DP2 and DP3 build silver, gold and the features (B6), register the tables in the Hive Metastore (B7) and load the `dwh` star schema (B8). Trino serves the lakehouse and Postgres serves `dwh` to analysts (B10 to B12). |
-| Stream, S1 to S3 | orange | The scan producer replays parcel scans into Kafka, with event time as the record time (S1). Flink reads them (S2) and writes 5-minute hub counts and late scans back (S3). |
-| Governance, G1 to G7 | green | The DataHub recipes read the schemas of every zone (G1, G2). Airflow's DataHub plugin sends each task's lineage, and the Great Expectations results as assertions (G3, G4). The frontend shows the catalog, lineage and quality (G7). |
+| Data generation, D1 and D2 | purple | The generator fills the two sources once per scale: the order system in Postgres `oms` (D1, `COPY`) and the app's export files in `s3://app-exports` (D2, Parquet). |
+| Batch pipelines, B1 to B11 | blue | DP1 runs daily and triggers DP2, which triggers DP3. The Airflow scheduler submits each job to Spark and runs its driver (B1). The executors read the changed `oms` rows (B2) and the new export dates (B3) and write the Delta tables of bronze, silver, gold and the features (B4). The drivers register the tables in the Hive Metastore (B5) and write the Spark event logs (B7). DP2 loads the `dwh` star schema (B6). Trino reads the Delta files (B8) with the table definitions (B9) and answers SQL on the lakehouse (B10); Postgres answers SQL on `dwh` (B11). |
+| Streaming, S1 to S5 | orange | The scan producer replays a week of parcel scans into Kafka, with each scan's event time as the record time (S1), and submits the Flink job (S2). Flink reads the scans (S3) and writes the 5-minute hub counts and the late scans back (S4). `stream_windows.py` reads the results to check them against the truth (S5). |
+| Governance, G1 to G9 | green | DataHub's ingestion reads the schemas of `oms` and `dwh` (G1), of the lakehouse through Trino (G2) and of the Kafka topics (G3), and sends them to GMS (G4). `publish_assertions` reads the validation results from `s3://lakehouse/_validation` (G5), and Airflow sends each task's lineage and those results as assertions (G6). GMS indexes the metadata in OpenSearch (G7) and serves the catalog, lineage and quality to the frontend (G8), which the analyst opens in a browser (G9). |
 
 | Profile | Deployable units | Details |
 |---|---|---|
@@ -86,6 +108,7 @@ Each profile can also start on its own, on top of `core`.
 ├── tests/               pytest checks, run with: uv run pytest
 ├── seed/                the Kaggle seed file (gzipped) and its MIT license
 ├── docs/                one document per major part, with its screenshots in docs/images/
+│   └── diagrams/        the README diagrams: their IR (*.json), layouts and the drawing script
 ├── pyproject.toml       Python project settings, dependencies and the ruff lint rules
 ├── uv.lock              exact versions of every Python dependency
 ├── .env.example         template for the local .env file (the real .env is never committed)

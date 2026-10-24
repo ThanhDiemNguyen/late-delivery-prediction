@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "System architecture: the deployable units and the data they exchange",
+    "subtitle": "LastLeg Logistics late-delivery data platform, EDAI-1",
+    "description": "Every box is a deployable unit: a container of one Compose profile, or a process on the Mac. Arrows follow the data, carry it as their label, and are numbered per flow: D data generation, B batch pipelines, S streaming, G governance.",
+    "visual_preset": "classic",
+    "theme": "light",
+    "animation": "none",
+    "views": [
+      { "id": "generation", "title": "D: data generation", "narrative": "The generator fills the two sources: the order system in Postgres and the app exports in SeaweedFS.", "focus_nodes": ["generator", "postgres", "seaweedfs"] },
+      { "id": "batch", "title": "B: batch pipelines", "narrative": "Airflow submits DP1 to DP3 to Spark. Spark copies the sources into bronze, builds silver, gold and the features, registers the tables and loads the warehouse. Trino and Postgres serve them.", "focus_nodes": ["scheduler", "spark", "postgres", "seaweedfs", "metastore", "trino", "history", "analyst"] },
+      { "id": "stream", "title": "S: streaming", "narrative": "The scan producer replays parcel scans into Kafka. Flink counts the deliveries per hub in 5-minute windows and writes the counts and the late scans back.", "focus_nodes": ["producer", "kafka", "flink"] },
+      { "id": "governance", "title": "G: governance", "narrative": "DataHub reads the schemas of every zone, Airflow sends the lineage of each task and the validation results, and the frontend shows the catalog.", "focus_nodes": ["ingestion", "gms", "opensearch", "frontend", "scheduler"] }
+    ]
+  },
+  "boundaries": [
+    { "id": "mac-sources", "label": "Mac: host process", "role": "external-zone", "components": ["generator"] },
+    { "id": "docker-vm", "label": "Docker Desktop VM: compose project", "role": "cluster", "components": ["postgres", "seaweedfs", "kafka", "spark", "metastore", "history", "trino", "scheduler", "webserver", "flink", "gms", "opensearch", "frontend"] },
+    { "id": "mac-users", "label": "Mac: host processes and users", "role": "external-zone", "components": ["ingestion", "producer", "analyst"] }
+  ],
+  "components": [
+    { "id": "generator", "label": "Data generator", "description": "generator/*.py, --scale 1.0 = 110.19 GB", "role": "worker", "tags": ["host"], "layer": 0 },
+    { "id": "postgres", "label": "Postgres 16", "description": "oms (source), dwh (warehouse), and the airflow, metastore and datahub databases", "role": "database", "tags": ["core"], "layer": 1 },
+    { "id": "seaweedfs", "label": "SeaweedFS (S3)", "description": "s3://app-exports (source exports), s3://lakehouse (bronze, silver, gold, _validation)", "role": "storage", "tags": ["core"], "layer": 1 },
+    { "id": "kafka", "label": "Kafka 3.9", "description": "parcel-scans, hub-delivery-5m, scans-late (KRaft)", "role": "queue", "tags": ["core"], "layer": 3 },
+    { "id": "scheduler", "label": "Airflow scheduler", "description": "DP1, DP2, DP3 and the Spark drivers (client mode)", "role": "backend", "tags": ["orch"], "layer": 2 },
+    { "id": "webserver", "label": "Airflow webserver", "description": "UI :8082, reads the airflow database", "role": "frontend", "tags": ["orch"], "layer": 3 },
+    { "id": "spark", "label": "Spark 3.5.9", "description": "master + worker, Delta Lake 3.3.3", "role": "worker", "tags": ["batch"], "layer": 2 },
+    { "id": "history", "label": "Spark history server", "description": "Spark UI :18080", "role": "frontend", "tags": ["batch"], "layer": 3 },
+    { "id": "metastore", "label": "Hive Metastore", "description": "table catalog for Spark and Trino", "role": "database", "tags": ["batch"], "layer": 3 },
+    { "id": "trino", "label": "Trino 479", "description": "SQL on every lakehouse zone, :8090", "role": "backend", "tags": ["query"], "layer": 4 },
+    { "id": "flink", "label": "Flink 1.20.5", "description": "jobmanager + taskmanager, scan_windows.py", "role": "worker", "tags": ["stream"], "layer": 4 },
+    { "id": "ingestion", "label": "DataHub ingestion", "description": "datahub ingest, 3 recipes", "role": "worker", "tags": ["host"], "layer": 5 },
+    { "id": "gms", "label": "DataHub GMS", "description": "metadata service :8083", "role": "backend", "tags": ["gov"], "layer": 6 },
+    { "id": "opensearch", "label": "OpenSearch", "description": "search index of DataHub", "role": "database", "tags": ["gov"], "layer": 7 },
+    { "id": "frontend", "label": "DataHub frontend", "description": "catalog UI :9002", "role": "frontend", "tags": ["gov"], "layer": 7 },
+    { "id": "producer", "label": "Scan producer", "description": "scan_producer.py, stream_windows.py", "role": "worker", "tags": ["host"], "layer": 5 },
+    { "id": "analyst", "label": "Analyst", "description": "DBeaver, browser", "role": "external", "tags": ["user"], "layer": 8 }
+  ],
+  "connections": [
+    { "id": "d1", "from": "generator", "to": "postgres", "label": "D1 orders, couriers, | hubs (COPY, oms)", "kind": "sync" },
+    { "id": "d2", "from": "generator", "to": "seaweedfs", "label": "D2 pings, scans | (Parquet, app-exports)", "kind": "sync" },
+    { "id": "b1", "from": "scheduler", "to": "spark", "label": "B1 spark-submit | DP1 to DP3", "kind": "sync" },
+    { "id": "b2", "from": "postgres", "to": "spark", "label": "B2 changed oms rows | (JDBC, DP1)", "kind": "sync" },
+    { "id": "b3", "from": "seaweedfs", "to": "spark", "label": "B3 new export dates | (DP1)", "kind": "sync" },
+    { "id": "b4", "from": "spark", "to": "seaweedfs", "label": "B4 Delta bronze, silver, | gold, feat_ (DP1 to DP3)", "kind": "sync" },
+    { "id": "b5", "from": "scheduler", "to": "metastore", "label": "B5 table definitions | (from the drivers)", "kind": "sync" },
+    { "id": "b6", "from": "spark", "to": "postgres", "label": "B6 star schema | (JDBC to dwh, DP2)", "kind": "sync" },
+    { "id": "b7", "from": "scheduler", "to": "history", "label": "B7 event logs", "kind": "sync" },
+    { "id": "b8", "from": "seaweedfs", "to": "trino", "label": "B8 Delta files", "kind": "sync" },
+    { "id": "b9", "from": "metastore", "to": "trino", "label": "B9 table | definitions", "kind": "sync" },
+    { "id": "b10", "from": "trino", "to": "analyst", "label": "B10 SQL results (lakehouse)", "kind": "sync" },
+    { "id": "b11", "from": "postgres", "to": "analyst", "label": "B11 SQL results | (dwh)", "kind": "sync" },
+    { "id": "s1", "from": "producer", "to": "kafka", "label": "S1 scan events | (event time)", "kind": "stream" },
+    { "id": "s2", "from": "producer", "to": "flink", "label": "S2 flink run | (job submit)", "kind": "sync" },
+    { "id": "s3", "from": "kafka", "to": "flink", "label": "S3 parcel-scans", "kind": "stream" },
+    { "id": "s4", "from": "flink", "to": "kafka", "label": "S4 5-min hub counts, | late scans", "kind": "stream" },
+    { "id": "s5", "from": "kafka", "to": "producer", "label": "S5 window | results", "kind": "stream" },
+    { "id": "g1", "from": "postgres", "to": "ingestion", "label": "G1 oms, dwh schemas", "kind": "async" },
+    { "id": "g2", "from": "trino", "to": "ingestion", "label": "G2 lakehouse schemas", "kind": "async" },
+    { "id": "g3", "from": "kafka", "to": "ingestion", "label": "G3 topic schemas", "kind": "async" },
+    { "id": "g4", "from": "ingestion", "to": "gms", "label": "G4 metadata", "kind": "async" },
+    { "id": "g5", "from": "seaweedfs", "to": "scheduler", "label": "G5 validation results | (_validation)", "kind": "async" },
+    { "id": "g6", "from": "scheduler", "to": "gms", "label": "G6 lineage, assertions | (DataHub plugin)", "kind": "async" },
+    { "id": "g7", "from": "gms", "to": "opensearch", "label": "G7 search | index", "kind": "async" },
+    { "id": "g8", "from": "gms", "to": "frontend", "label": "G8 catalog, | lineage, quality", "kind": "async" },
+    { "id": "g9", "from": "frontend", "to": "analyst", "label": "G9 DataHub UI", "kind": "async" }
+  ]
+}
