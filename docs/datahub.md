@@ -1,7 +1,7 @@
 # DataHub: the platform's catalog, lineage and data quality
 
-DataHub v1.5.0.6 holds the schema of every table in every zone and the lineage of the Airflow
-pipelines DP1 to DP3. The Great Expectations results follow in the next step.
+DataHub v1.5.0.6 holds the schema of every table in every zone, the lineage of the Airflow
+pipelines DP1 to DP3, and the result of every Great Expectations check those pipelines run.
 
 ## Services (profile `gov`)
 
@@ -124,9 +124,78 @@ green. Then a GraphQL query on GMS returned:
   the sources: 6 gold, 5 silver, 7 bronze, the 5 `oms` tables and the 2 app exports. The silver
   table that does not appear is `stg_parcel_scans`, because no gold job reads it.
 
+## Data validation: Great Expectations results as assertions
+
+Each pipeline's `validate_suite` task (`validate_bronze` in DP1) writes its results to
+`s3a://lakehouse/_validation/<suite>/ds=<ds>/results.json`. The `publish_assertions` task after
+it (`airflow/dags/datahub_assertions.py`) sends them to DataHub:
+
+- **One assertion per expectation,** on the dataset that the expectation checked. Its URN is a
+  hash of the suite, the check, the expectation and its arguments, so the same check is the same
+  assertion in every run. A check on a derived frame, such as `gold.fact_delivery labels`, belongs
+  to the table its name starts with.
+- **One run event per assertion and run,** with partition `ds=<ds>`, the result (`SUCCESS` or
+  `FAILURE`), the rows checked, the unexpected rows and the observed value.
+
+The dataset's **Quality** tab lists the assertions with platform `great-expectations` and the
+result of each run.
+
+| Expectation | DataHub scope | Aggregation and operator |
+|---|---|---|
+| `expect_column_values_to_not_be_null` | column | identity, not null |
+| `expect_column_values_to_be_in_set` | column | identity, in |
+| `expect_column_values_to_be_unique` | column | unique proportion, equal to 1 |
+| `expect_column_values_to_be_between` | column | identity, between |
+| `expect_column_mean_to_be_between` | column | mean, between |
+| `expect_table_row_count_to_be_between`, `_to_equal` | rows | row count, between, at least or equal to |
+| `expect_column_pair_values_A_to_be_greater_than_B` | column (both columns) | native, greater than (or equal to) |
+| `expect_compound_columns_to_be_unique` | rows (the key columns) | native |
+| `expect_column_to_exist` | schema | native |
+
+The task runs with trigger rule `all_done`, so a failed suite still shows in DataHub. The
+trigger to the next pipeline does not depend on it, so a failed suite still stops the chain.
+The task skips in two cases:
+
+- the plugin is off (`DATAHUB_ENABLED=false`);
+- the suite wrote no results in this run, for example because the ingest before it failed. A
+  `results.json` older than the suite's start is from an earlier run, so it is not sent again.
+
+The SCD2 check (`validate_scd2`) and the full-recompute check (`validate_incremental`) are Spark
+checks without Great Expectations. They stop the chain when they fail but are not published.
+
+| Pipeline | Datasets with assertions | Assertions |
+|---|---|---:|
+| DP1 | the 7 bronze tables | 73 |
+| DP2 | `stg_orders`, `stg_courier_pings`, `stg_parcel_scans`, `dim_courier`, `fact_delivery`, `fact_courier_activity_hourly` | 61 |
+| DP3 | `feat_courier_daily`, `feat_hub_hourly`, `feat_zone_daily` | 31 |
+
+### Checks (2026-10-23)
+
+- **2024-11-27, all green.** The three tasks sent 73, 61 and 31 assertions, 165 in all, none
+  failed. A GraphQL query of each dataset's assertions found them on 16 datasets with platform
+  `great-expectations`, each with one run for `ds=2024-11-27`. Sending the same report again
+  replaced the run instead of adding one.
+- **The failure drill again, on 2024-12-01** (`oms` backed up first). The same 100 corrupted
+  orders as in [airflow.md](airflow.md#failure-drill-a-corrupted-batch-blocks-everything-downstream)
+  were inserted and DP1 was rerun:
+  - `validate_bronze` failed, `trigger_dp2` was `upstream_failed`, and `publish_assertions`
+    succeeded: "45 assertions sent to DataHub, 2 failed";
+  - on `delta.bronze.raw_orders`, "traffic takes only allowed values" and "status takes only
+    allowed values" each got a `FAILURE` run with 100 unexpected rows.
+- **The repair.** After the batch was deleted from `oms` and bronze, the chain ran green for
+  2024-12-01, and the tasks sent 45, 30 and 19 assertions with none failed (the after-period slices
+  are skipped on that day). The two assertions now show three runs: pass, fail, pass.
+
+Screenshots of a dataset's Quality tab (for example `delta.bronze.raw_orders`) go with this
+document.
+
 ## Pitfalls
 
 - **Recipe patterns match from the start of the name.** A deny pattern of `\.dp3_progress$` let
   the table through. `.*\.dp3_progress$` excludes it. The entry that had been ingested was
   soft-deleted with `datahub delete --soft`.
 - **Port 8080 on the Mac is the Spark master UI,** so GMS is on 8083.
+- **`UNIQUE_PROPORTION` breaks the Quality tab.** The Python SDK has both `UNIQUE_PROPORTION` and
+  the misspelled `UNIQUE_PROPOTION`, but the GraphQL API only knows `UNIQUE_PROPOTION`. With the
+  correct spelling, GMS stored the assertions and every GraphQL query of the dataset's assertions
+  failed (`No enum constant ... UNIQUE_PROPORTION`).

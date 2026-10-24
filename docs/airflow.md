@@ -29,7 +29,7 @@ multi-stage rewrite comes later.
 | Java 17 and `/opt/spark`, copied from `lastleg/spark:3.5.9-naive` | a Spark client identical to the cluster, with every lakehouse jar, so the driver Airflow starts matches the executors |
 | `/opt/driver-python`, a virtual environment with Great Expectations 0.18.19, Sedona 1.9.0, h3 4.5.0 and delta-spark 3.3.3 | the drivers' Python. GE and Sedona pin versions that clash with Airflow's. PySpark itself comes from `SPARK_HOME` at run time, so it always matches the cluster |
 | `apache-airflow-providers-apache-spark` 5.0.0, without its dependencies | `SparkSubmitOperator` only calls the `spark-submit` binary, so it does not need its 340 MB PySpark dependency |
-| `acryl-datahub-airflow-plugin` 1.5.0.17 | lineage and assertions to DataHub. It is off (`AIRFLOW__DATAHUB__ENABLED=false`) until the governance profile exists |
+| `acryl-datahub-airflow-plugin` 1.5.0.17 | lineage and assertions to DataHub ([datahub.md](datahub.md)). It is on by default; set `DATAHUB_ENABLED=false` to run Airflow without the `gov` profile |
 
 **Users and hosts.** The containers run as user `185:0`, the Spark user. That way the drivers can
 write event logs to the `spark_events` volume, which the history server reads. The Airflow image
@@ -101,6 +101,7 @@ The DAGs run from 2024-06-01 to 2024-12-01. The extra last day loads the parcels
 
 ```text
 ingest_bronze (jobs/dp1_ingest.py --until {{ ds }})  >>  validate_bronze (jobs/validate.py --suite dp1 --ds {{ ds }} --period-end {{ var.value.period_end }} --fail-on-error)  >>  trigger_dp2
+validate_bronze  >>  publish_assertions (the suite's results to DataHub, trigger rule all_done)
 ```
 
 `validate_bronze` fails the run when any expectation fails, so nothing after it runs on bad
@@ -130,6 +131,7 @@ DP2 has no schedule. `dp1_ingest_validate` starts it for the same logical date
 ingest stage:   silver >> gold_dims >> gold_facts >> warehouse
 validate stage: >> [validate_suite (jobs/validate.py --suite dp2 --ds {{ ds }} ...), validate_scd2 (jobs/check_dim_courier.py)]
                 >> trigger_dp3
+validate_suite >> publish_assertions (the suite's results to DataHub, trigger rule all_done)
 ```
 
 **Check on the dev slice (2026-10-23).** A run of `dp1_ingest_validate` for 2024-11-30 passed its
@@ -158,6 +160,7 @@ checks passed.
 ```text
 ingest stage:   features (jobs/dp3_features.py --incremental: only what the facts' Change Data Feed changed)
 validate stage: >> [validate_suite (jobs/validate.py --suite dp3 --ds {{ ds }} ...), validate_incremental (jobs/check_cdf.py)]
+validate_suite >> publish_assertions (the suite's results to DataHub, trigger rule all_done)
 ```
 
 `validate_incremental` compares every incrementally maintained feature table with a full
@@ -199,8 +202,9 @@ The drill was run on 2026-10-23 against the order system.
      and the suite passed 19 of 19.
 
 The failed `validate_bronze` still wrote its results
-(`s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json`) before the run stopped. DataHub
-shows them later.
+(`s3a://lakehouse/_validation/dp1/ds=2024-12-01/results.json`) before the run stopped, and
+`publish_assertions` sends them to DataHub even when the suite fails
+([datahub.md](datahub.md#data-validation-great-expectations-results-as-assertions)).
 
 ## Pitfalls
 
@@ -217,5 +221,11 @@ shows them later.
   deletes a folder that only the feature branch has (here `airflow/`), and the merge creates it
   again as a new folder. Containers that mounted it then see an empty folder until they are
   recreated (`up -d --force-recreate`).
+- **A new module in the DAG folder needs a scheduler restart.** The DAG files import
+  `datahub_assertions.py`, which was added while the scheduler ran. Its DAG processor did not see
+  the new file: every DAG file failed with `ModuleNotFoundError: No module named
+  'datahub_assertions'`, the three DAGs were deactivated, and a triggered run stayed `queued`.
+  `airflow tasks test` worked because it starts a fresh process. `docker compose restart
+  airflow-scheduler airflow-webserver` fixed it.
 - **`--profile orch` alone is not enough,** like `batch`: Airflow needs Postgres from `core` and
   the Spark cluster from `batch`.
