@@ -159,7 +159,9 @@ def main() -> None:
         .process(CountScans(args.mode), output_type=Types.STRING())
     )
     counts.sink_to(kafka_sink(OUTPUT))
-    counts.get_side_output(late).map(as_json, output_type=Types.STRING()).sink_to(kafka_sink(LATE))
+    # Its own task, not chained to the window: the Flink UI then counts the late scans as its records in.
+    late_scans = counts.get_side_output(late).map(as_json, output_type=Types.STRING()).name("late scans").disable_chaining()
+    late_scans.sink_to(kafka_sink(LATE))
     env.execute(f"scan_windows {args.mode}")
 
 
