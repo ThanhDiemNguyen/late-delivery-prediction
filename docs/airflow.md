@@ -18,9 +18,14 @@ DAGs.
 docker compose --profile core --profile batch --profile orch up -d --wait
 ```
 
-## The image (`infra/airflow/Dockerfile.naive`)
+## The image (`infra/airflow/Dockerfile.naive`, then `Dockerfile`)
 
-The image is built on `apache/airflow:2.10.5-python3.10` and is 3.23 GB. This first version is
+The services now run `lastleg/airflow:2.10.5` from the multi-stage `infra/airflow/Dockerfile`:
+2.31 GB, on the slim Airflow image with only the providers the DAGs use
+([environment.md](environment.md#built-images-naive-against-multi-stage)). The rest of this section
+describes the first, naive build, kept as the size baseline.
+
+The naive image is built on `apache/airflow:2.10.5-python3.10` and is 3.23 GB. This first version is
 deliberately naive: everything is copied and installed in one image and nothing is removed. A
 multi-stage rewrite comes later.
 

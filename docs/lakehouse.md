@@ -30,7 +30,12 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/<job>.py
 With `core` and `batch` running and no job active, the containers use about 3.1 GB in total
 (measured with `docker stats` after the smoke test).
 
-## The Spark image (`infra/spark/Dockerfile.naive`)
+## The Spark image (`infra/spark/Dockerfile.naive`, then `Dockerfile`)
+
+The services now run `lastleg/spark:3.5.9` from the multi-stage `infra/spark/Dockerfile` (1.96 GB
+against 2.82 GB, with the same jars and packages;
+[environment.md](environment.md#built-images-naive-against-multi-stage)). This section describes
+the contents, which both builds share.
 
 The image is built on `apache/spark:3.5.9-scala2.12-java17-python3-ubuntu` (Ubuntu 22.04, Python
 3.10.12, Java 17) and adds:

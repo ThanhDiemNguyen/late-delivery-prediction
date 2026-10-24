@@ -135,7 +135,8 @@ The chain ran for 2024-11-27 with the plugin on: DP1 in 67 s, DP2 at 346 s, DP3 
 green. Then a GraphQL query on GMS returned:
 
 - 3 DataFlows and 13 DataJobs. Each Spark task has the inputs and outputs in the table above; the
-  two trigger tasks have none.
+  two trigger tasks have none. The `publish_assertions` task of each DAG came later (below), so
+  the pipelines now have 16 tasks; the screenshots show them.
 - An upstream lineage search from `dwh.public.fact_delivery` that reaches every zone back to
   the sources: 6 gold, 5 silver, 7 bronze, the 5 `oms` tables and the 2 app exports. The silver
   table that does not appear is `stg_parcel_scans`, because no gold job reads it.
@@ -211,7 +212,7 @@ checks without Great Expectations. They stop the chain when they fail but are no
 | Pipeline | Datasets with assertions | Assertions |
 |---|---|---:|
 | DP1 | the 7 bronze tables | 73 |
-| DP2 | `stg_orders`, `stg_courier_pings`, `stg_parcel_scans`, `dim_courier`, `fact_delivery`, `fact_courier_activity_hourly` | 61 |
+| DP2 | `stg_orders`, `stg_courier_pings`, `stg_parcel_scans`, `dim_courier`, `fact_delivery`, `fact_courier_activity_hourly` | 62 (61 before the `late_trip_min` check) |
 | DP3 | `feat_courier_daily`, `feat_hub_hourly`, `feat_zone_daily` | 31 |
 
 ### Checks (2026-10-23)
@@ -220,6 +221,8 @@ checks without Great Expectations. They stop the chain when they fail but are no
   failed. A GraphQL query of each dataset's assertions found them on 16 datasets with platform
   `great-expectations`, each with one run for `ds=2024-11-27`. Sending the same report again
   replaced the run instead of adding one.
+- **Later (2026-10-24).** The DP2 suite gained the `late_trip_min` check, so DP2 sends 62
+  assertions, and `fact_courier_activity_hourly` has 6 ([airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24)).
 - **The failure drill again, on 2024-12-01** (`oms` backed up first). The same 100 corrupted
   orders as in [airflow.md](airflow.md#failure-drill-a-corrupted-batch-blocks-everything-downstream)
   were inserted and DP1 was rerun:

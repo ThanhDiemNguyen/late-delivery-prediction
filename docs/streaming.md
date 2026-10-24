@@ -128,7 +128,9 @@ docker compose --profile core --profile stream up -d --wait
 | `flink-jobmanager` | `lastleg/flink:1.20.5-naive` | `jobmanager.memory.process.size: 1024m` | `127.0.0.1:8084` (Flink UI; 8081 is the Spark worker UI) | 338 MiB |
 | `flink-taskmanager` | same | `taskmanager.memory.process.size: 2048m`, 1 slot, parallelism 1 | | 427 MiB |
 
-The image (`infra/flink/Dockerfile.naive`, 2.03 GB) adds these to `flink:1.20.5-scala_2.12-java17`:
+The image adds these to `flink:1.20.5-scala_2.12-java17`. The first build
+(`infra/flink/Dockerfile.naive`) was 2.06 GB; the services now run the multi-stage
+`infra/flink/Dockerfile` at 1.68 GB ([environment.md](environment.md#built-images-naive-against-multi-stage)):
 
 - Python 3.10.12 and PyFlink 1.20.5, compiled from source because PyPI has no arm64 wheel
   ([environment.md](environment.md#pyflink-on-arm64)). The compilers stay in this one-stage image.
