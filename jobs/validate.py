@@ -73,6 +73,11 @@ def fact_with_dimensions(spark: SparkSession, ds: str) -> DataFrame:
     return fact
 
 
+def hub_hours_of_day(ds):
+    """Return a filter for the hub-hour rows whose local hour falls on day ds."""
+    return F.to_date(F.from_utc_timestamp("hour_start", LA)) == F.lit(ds)
+
+
 def fact_labels(spark: SparkSession, ds: str) -> DataFrame:
     """Return day ds of fact_delivery with the label as 0/1, for its mean."""
     return spark.table("gold.fact_delivery").where(date_key(ds)).select("order_id", F.col("is_late").cast("int").alias("late"))
@@ -188,6 +193,28 @@ SUITES = {
             ("expect_column_values_to_be_between", {"column": "ping_count", "min_value": 1, "max_value": 144}),
             ("expect_column_values_to_be_between", {"column": "idle_min", "min_value": 0, "max_value": 60}),
             ("expect_column_values_to_be_between", {"column": "km_moved", "min_value": 0, "max_value": 120}),
+        ]),
+    ],
+    "dp3": [
+        ("gold.feat_courier_daily", on_day("feature_date"), [
+            ("expect_table_row_count_to_be_between", {"min_value": 1}),
+            ("expect_compound_columns_to_be_unique", {"column_list": ["courier_id", "feature_date"]}),
+            *not_null("courier_id", "feature_date", "deliveries_7d", "event_timestamp", "created"),
+            ("expect_column_values_to_be_between", {"column": "on_time_rate_30d", "min_value": 0, "max_value": 1}),
+            ("expect_column_values_to_be_between", {"column": "avg_speed_kmh_7d", "min_value": 0, "max_value": 80}),
+            ("expect_column_values_to_be_between", {"column": "deliveries_7d", "min_value": 0, "max_value": 2000}),
+            # point in time: a row is computed only after the period it describes has ended
+            ("expect_column_pair_values_A_to_be_greater_than_B", {"column_A": "created", "column_B": "event_timestamp", "or_equal": True}),
+        ]),
+        ("gold.feat_hub_hourly", hub_hours_of_day, [
+            # 40 hubs x 24 hours (25 on the day daylight saving time ends)
+            ("expect_table_row_count_to_be_between", {"min_value": 40 * 24, "max_value": 40 * 25}),
+            ("expect_compound_columns_to_be_unique", {"column_list": ["hub_id", "hour_start"]}),
+            *not_null("hub_id", "hour_start", "orders_1h", "active_couriers_1h", "event_timestamp", "created"),
+            ("expect_column_values_to_be_between", {"column": "late_rate_7d", "min_value": 0, "max_value": 1}),
+            ("expect_column_values_to_be_between", {"column": "orders_1h", "min_value": 0}),
+            ("expect_column_pair_values_A_to_be_greater_than_B", {"column_A": "event_timestamp", "column_B": "hour_start"}),
+            ("expect_column_pair_values_A_to_be_greater_than_B", {"column_A": "created", "column_B": "event_timestamp", "or_equal": True}),
         ]),
     ],
 }

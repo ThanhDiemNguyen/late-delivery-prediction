@@ -452,6 +452,24 @@ values, and the rolling windows (`rangeBetween` over a day or hour number) never
 
 The job took 51 s.
 
+## DP3: validate the feature tables (`jobs/validate.py --suite dp3`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.py --suite dp3 --ds 2024-11-03 --fail-on-error
+```
+
+| Dataset (day `ds`) | Expectations |
+|---|---|
+| `gold.feat_courier_daily` | rows exist; `(courier_id, feature_date)` unique; no NULL key, `deliveries_7d`, `event_timestamp` or `created`; on-time rate 0 to 1; speed 0 to 80 km/h; `created >= event_timestamp` (a row is computed only after its day has ended) |
+| `gold.feat_hub_hourly` | 960 to 1,000 rows (40 hubs × 24 hours, or 25 when daylight saving time ends); `(hub_id, hour_start)` unique; no NULL key, counts or time columns; late rate 0 to 1; `event_timestamp > hour_start`; `created >= event_timestamp` |
+
+### Checks on the dev slice (2026-10-23)
+
+| Day | Result | Exit code |
+|---|---|---|
+| 2024-09-07 | 23 of 23 expectations passed | 0 |
+| 2024-11-03 (daylight saving time ends: 25 local hours) | 23 of 23 passed | 0 |
+
 ### DP2 pitfalls
 
 - **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
