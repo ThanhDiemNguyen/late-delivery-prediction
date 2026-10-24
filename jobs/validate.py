@@ -84,6 +84,13 @@ def fact_labels(spark: SparkSession, ds: str) -> DataFrame:
     return spark.table("gold.fact_delivery").where(date_key(ds)).select("order_id", F.col("is_late").cast("int").alias("late"))
 
 
+# Daily slices that are empty after the period: couriers stop working and no order is placed, while
+# late deliveries, their scans and order updates still arrive on the next day.
+EMPTY_AFTER_PERIOD = {
+    "bronze.raw_courier_pings", "silver.stg_courier_pings", "gold.fact_courier_activity_hourly",
+    "gold.fact_delivery", "gold.fact_delivery joined to its dimensions", "gold.fact_delivery labels",
+}
+
 # Datasets that are built for a check instead of read as one table.
 DERIVED = {
     "gold.fact_delivery joined to its dimensions": fact_with_dimensions,
@@ -242,10 +249,16 @@ def corrupt(table: str, df: DataFrame) -> DataFrame:
     return df
 
 
-def run_suite(spark: SparkSession, suite: str, ds: str, corrupted: bool) -> dict:
-    """Run every expectation of the suite on day ds and return the results."""
-    results = []
+def run_suite(spark: SparkSession, suite: str, ds: str, corrupted: bool, period_end: str) -> dict:
+    """Run every expectation of the suite on day ds and return the results.
+
+    For a day after period_end, the slices in EMPTY_AFTER_PERIOD are skipped (they have no rows).
+    """
+    results, skipped = [], []
     for table, row_filter, expectations in SUITES[suite]:
+        if ds > period_end and table in EMPTY_AFTER_PERIOD:
+            skipped.append(table)
+            continue
         df = DERIVED[table](spark, ds) if table in DERIVED else spark.table(table)
         if row_filter is not None:
             df = df.where(row_filter(ds))
@@ -265,6 +278,7 @@ def run_suite(spark: SparkSession, suite: str, ds: str, corrupted: bool) -> dict
     return {
         "suite": suite, "ds": ds, "corrupted": corrupted, "run_at": datetime.now(timezone.utc).isoformat(),
         "evaluated": len(results), "failed": len(failed), "success": not failed, "results": results,
+        "skipped_after_period": skipped,
     }
 
 
@@ -275,17 +289,19 @@ def main() -> None:
     parser.add_argument("--ds", required=True, help="business day, YYYY-MM-DD (local LA date)")
     parser.add_argument("--corrupt", action="store_true", help="validate a corrupted copy of the slice")
     parser.add_argument("--fail-on-error", action="store_true", help="exit 1 when any expectation fails")
+    parser.add_argument("--period-end", default="2024-11-30", help="last day with pings and new orders")
     args = parser.parse_args()
     spark = lakehouse_session(f"validate_{args.suite}")
-    report = run_suite(spark, args.suite, args.ds, args.corrupt)
+    report = run_suite(spark, args.suite, args.ds, args.corrupt, args.period_end)
     name = "results-corrupted.json" if args.corrupt else "results.json"
     path = f"{OUT}/{args.suite}/ds={args.ds}/{name}"
     spark.createDataFrame([(json.dumps(report),)], "json string").coalesce(1).write.mode("overwrite").text(path)
     for r in report["results"]:
         if not r["success"]:
             print(f"FAIL {r['table']} {r['expectation']} {r['kwargs']} observed {r['observed']}")
+    skipped = f"; skipped after the period: {report['skipped_after_period']}" if report["skipped_after_period"] else ""
     print(f"suite {args.suite} ds {args.ds}{' (corrupted)' if args.corrupt else ''}: "
-          f"{report['evaluated'] - report['failed']} of {report['evaluated']} expectations passed; results in {path}")
+          f"{report['evaluated'] - report['failed']} of {report['evaluated']} expectations passed; results in {path}{skipped}")
     spark.stop()
     sys.exit(1 if args.fail_on_error and report["failed"] else 0)
 

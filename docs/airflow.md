@@ -84,9 +84,50 @@ The installed versions were checked inside the image:
 Screenshots to add from the UI (Admin → Connections, Admin → Variables, Admin → Pools) are listed
 in the project checklist. They show the same entries; the UI masks the passwords.
 
+## DAGs
+
+The DAGs build their Spark tasks with one factory, `airflow/dags/lakehouse_tasks.py`:
+
+- **How it submits:** `SparkSubmitOperator` on connection `spark_lakehouse`, in pool `spark`, with
+  the job path from variable `jobs_dir`.
+- **Credentials:** they come from connections in templated `env_vars`
+  (`{{ conn.oms_postgres.password }}`, `{{ conn.lakehouse_s3.password }}`).
+- **Spark settings:** `spark.driver.host` is set to `airflow-scheduler`.
+
+The DAGs run from 2024-06-01 to 2024-12-01. The extra last day loads the parcels ordered on
+2024-11-30 and delivered after midnight: their order update and their scans belong to 2024-12-01.
+
+### DP1: `dp1_ingest_validate`
+
+```text
+ingest_bronze (jobs/dp1_ingest.py --until {{ ds }})  >>  validate_bronze (jobs/validate.py --suite dp1 --ds {{ ds }} --period-end {{ var.value.period_end }} --fail-on-error)
+```
+
+`validate_bronze` fails the run when any expectation fails, so nothing after it runs on bad
+bronze. For a day after `period_end`, the suite skips the slices that are empty then: pings, the
+hourly activity, and the orders placed that day.
+
+**Check on the dev slice (2026-10-23).** Bronze's rows from local 2024-11-29 on were deleted with a
+Delta `DELETE`, so the DAG had real work to do. (The deleted rows stay in the table's history, and
+the sources still hold them.) Then three runs were triggered:
+
+| Run | `ingest_bronze` | `validate_bronze` | Result |
+|---|---|---|---|
+| 2024-11-29 | +12,012 orders, +9 couriers and courier changes, +43 customers, +1 ping and +1 scan export date (29 s) | 73 of 73 (33 s) | success |
+| 2024-11-30 | the next day (31 s) | 73 of 73 (34 s) | success |
+| 2024-12-01 | the 2,519 orders and 2,838 scans changed after midnight | first run: failed. 72 of 73, because there are no pings after the period. After the period-end rule: 45 of 45 | success after the fix |
+
+After the runs, bronze equals the sources again: 808,000 orders, 49,350,264 pings, 2,424,000
+scans, 200 couriers, 1,093 courier changes and 50,000 customers. The 5.7 MB of task logs contain
+neither the Postgres password nor the S3 secret key.
+
 ## Pitfalls
 
 - **Never print connections as URIs.** `airflow connections list` prints the password in plain
   text unless the output is filtered, as above.
+- **New mounted folders after a merge.** Before a feature branch is merged, `git checkout develop`
+  deletes a folder that only the feature branch has (here `airflow/`), and the merge creates it
+  again as a new folder. Containers that mounted it then see an empty folder until they are
+  recreated (`up -d --force-recreate`).
 - **`--profile orch` alone is not enough,** like `batch`: Airflow needs Postgres from `core` and
   the Spark cluster from `batch`.
