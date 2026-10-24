@@ -15,6 +15,9 @@ PERIOD_END = pd.Timestamp("2024-12-01", tz=TIME_ZONE).tz_convert("UTC")  # exclu
 # Full-scale counts. The 1% development slice uses --scale 0.01.
 FULL_COURIERS = 20_000
 FULL_CUSTOMERS = 5_000_000
+FULL_ORDERS_PER_DAY = 400_000
+# Local-date weeks with more orders: a mid-July sale and Black Friday week. (first, last, factor)
+PEAK_WEEKS = [("2024-07-15", "2024-07-21", 2.0), ("2024-11-25", "2024-11-30", 3.0)]
 
 TRAFFIC_MIX = {"Low": 0.25, "Medium": 0.25, "High": 0.15, "Jam": 0.35}
 WEATHER_MIX = {"Sunny": 0.62, "Cloudy": 0.14, "Fog": 0.12, "Windy": 0.07, "Stormy": 0.05}

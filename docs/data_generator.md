@@ -1,8 +1,8 @@
 # Data generator
 
 The generator makes all of LastLeg Logistics' source data on the Mac (host Python, not Docker).
-This page grows with each generator step. So far it covers the seed, the delivery-time model and
-the reference data in the order system (`oms`).
+This page grows with each generator step. So far it covers the seed, the delivery-time model, and
+the reference data and orders in the order system (`oms`).
 
 ## The seed
 
@@ -108,7 +108,7 @@ uv run python -m generator.oms_reference --scale 0.01            # the 1% dev sl
 uv run python -m generator.oms_reference --scale 1.0 --replace   # full scale, replaces what is there
 ```
 
-The loader applies `generator/sql/oms_reference.sql` (`CREATE TABLE IF NOT EXISTS`), then loads
+The loader applies `generator/sql/oms_schema.sql` (`CREATE TABLE IF NOT EXISTS`), then loads
 all four tables with `COPY` in one transaction. If the tables already hold rows, it refuses unless
 `--replace` is given. Every timestamp is `timestamptz`, written in UTC. The same scale and seed
 always give the same rows; the default seed is 2024.
@@ -181,6 +181,83 @@ Each customer is placed by these steps:
 
 The home point is the customer's drop point. 15% sign up during the period, and the rest between
 2019 and the period start. The segment is consumer (88%) or small business (12%).
+
+## Orders in `oms`
+
+```bash
+uv run python -m generator.oms_orders --scale 0.01   # needs the reference data loaded first
+```
+
+Orders are generated one local day at a time, each day with its own random seed, and copied into
+`oms.orders` straight away. So memory stays at one day's rows even at full scale. The generator
+reads the couriers, the courier audit and the customers back from `oms`, so every order points to
+rows that really exist.
+
+**Volume.**
+
+- **Normal days:** 400,000 orders a day at full scale.
+- **Peak weeks:** 2× in the mid-July sale week (2024-07-15 to 07-21) and 3× in Black Friday week
+  (2024-11-25 to 11-30).
+- **Total:** 80.8M orders at full scale, 808,000 in the dev slice.
+
+**How one order is made:**
+
+| Field | Rule |
+|---|---|
+| order time | a local time of day from the seed (most orders 08:00 to 11:59 and 17:00 to 23:59), plus random seconds |
+| customer | any customer who signed up before that day |
+| hub | the customer's service hub, which gives the skew |
+| courier | a courier based at that hub that day, with the vehicle and rating valid that day. A hub with no courier that day borrows one from any hub, which only happens in small slices |
+| traffic, weather | the LA mix |
+| area | the hub's area type |
+| category | the seed's 16 categories |
+| distance | haversine km from the hub (the store point) to the customer's home (the drop point) |
+| pickup | 5, 10 or 15 minutes after the order, as in the seed |
+| delivery | order time plus the effect-model minutes, at least 10 minutes and at least 5 after pickup |
+| `promised_ts` | order time plus the SLA (area base + 3 min per km) |
+
+### How the order system stores an order
+
+`orders` copies the seed's legacy layout, so the silver layer has real cleaning to do:
+
+- **Local time as text.**
+  - `order_date` is the local LA date.
+  - `order_time` and `pickup_time` are local wall-clock text, `HH:MM:SS`.
+  - Only `promised_ts`, `delivered_ts` and `updated_ts` are `timestamptz`.
+  - On 2024-11-03, when daylight saving time ends, the local hour 01:00 to 01:59 happens twice, so
+    that text is ambiguous.
+- **Pickup after midnight.** An order at 23:55 picked up 10 minutes later shows `pickup_time`
+  00:05:xx with the same `order_date`. This rollover is not injected: it comes from the seed's
+  time-of-day pattern.
+- **Legacy spellings.** These are copied from the seed:
+  - every traffic value has a trailing space (`"Jam "`);
+  - every vehicle and area also has one, except `"van"` and `"Other"`;
+  - Metropolitan is written `"Metropolitian "`.
+- **Seed rates, measured from the seed file at run time:**
+
+| Dirty value | Seed rate | Dev slice in `oms` |
+|---|---:|---:|
+| Null block: traffic `"NaN "`, weather `"NaN"` and order_time `"NaN "` in the same row (as in the seed) | 0.21% | 0.203% |
+| Store coordinates (0, 0) | 8.01% | 8.01% |
+| Store latitude sign-flipped (14% of those also flip the longitude) | 0.43% | 0.432% |
+| Pickup rollover (`pickup_time < order_time`) | 1.89% | 1.83% |
+
+The delivery time is computed from the clean values. The dirty values only change how the row is
+stored, so the label does not depend on them.
+
+### Checks on the dev slice
+
+`tests/test_oms_orders.py` (10 checks on two weeks at 5% scale) and these SQL results on `oms`
+after loading the dev slice:
+
+| Check | Result |
+|---|---|
+| Rows | 808,000 orders, 2024-06-01 to 2024-11-30, loaded in 20 s |
+| Late share | 17.56% (the calibration gives about 17%. This slice's 200 couriers include 42.5% car drivers against the 40% mix, and cars add 14 minutes) |
+| Skew | Downtown LA 24.84% of orders, the top 10 hubs 59.89% |
+| Area mix | Metropolitan 55.08%, Urban 35.23%, Semi-Urban 6.67%, Other 3.02% |
+| Black Friday week | 12,000 orders a day, 3× normal |
+| Size | `oms` is 238 MB (about 280 B per order with its indexes), so about 23 GB at full scale |
 
 ## Limits
 

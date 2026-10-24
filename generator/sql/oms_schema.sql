@@ -1,4 +1,4 @@
--- Reference tables of the order management system (database oms), a source system owned by the
+-- Tables of the order management system (database oms), a source system owned by the
 -- Operations department. The generator applies this file before loading; it is safe to re-run.
 -- Every timestamp is timestamptz and is written in UTC. updated_ts is what DP1's incremental
 -- JDBC pull reads; courier_changes is append-only and is read by changed_ts.
@@ -54,3 +54,31 @@ CREATE TABLE IF NOT EXISTS customers (
     updated_ts     timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS customers_updated_ts ON customers (updated_ts);
+
+-- One parcel order. It copies the seed's legacy layout: the order and pickup times are local LA
+-- time typed as text next to a local order_date, and text fields keep the seed's spellings
+-- (trailing spaces, "Metropolitian", "NaN" literals). promised_ts and delivered_ts come from the
+-- delivery system and are clean. updated_ts is the last lifecycle change (the delivery).
+CREATE TABLE IF NOT EXISTS orders (
+    order_id     bigint PRIMARY KEY,
+    customer_id  bigint NOT NULL REFERENCES customers,
+    hub_id       smallint NOT NULL REFERENCES hubs,
+    courier_id   integer NOT NULL REFERENCES couriers,
+    category     text NOT NULL,
+    order_date   date NOT NULL,
+    order_time   text NOT NULL,
+    pickup_time  text NOT NULL,
+    promised_ts  timestamptz NOT NULL,
+    delivered_ts timestamptz NOT NULL,
+    status       text NOT NULL,
+    weather      text NOT NULL,
+    traffic      text NOT NULL,
+    vehicle      text NOT NULL,
+    area         text NOT NULL,
+    store_lat    double precision NOT NULL,
+    store_lon    double precision NOT NULL,
+    drop_lat     double precision NOT NULL,
+    drop_lon     double precision NOT NULL,
+    updated_ts   timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orders_updated_ts ON orders (updated_ts);

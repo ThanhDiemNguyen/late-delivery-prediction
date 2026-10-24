@@ -21,7 +21,7 @@ from generator.effect_model import EARTH_RADIUS_KM, load_seed
 from generator.la_config import FULL_COURIERS, FULL_CUSTOMERS, PERIOD_END, PERIOD_START, VEHICLE_MIX
 from generator.la_hubs import hubs_frame, inside_service_area
 
-SCHEMA_SQL = Path(__file__).resolve().parent / "sql" / "oms_reference.sql"
+SCHEMA_SQL = Path(__file__).resolve().parent / "sql" / "oms_schema.sql"
 DEFAULT_SEED = 2024
 TABLES = ("hubs", "couriers", "courier_changes", "customers")
 TRACKED = ["home_hub_id", "vehicle_type", "rating", "employment_type"]

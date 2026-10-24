@@ -51,7 +51,7 @@ Start them with `cp .env.example .env` (then change the passwords) and
 .
 ├── README.md            this file: domain, architecture, structure, links to docs
 ├── docker-compose.yaml  every service, grouped by Compose profile (core so far)
-├── generator/           host-Python data generator: seed effect model, LA config, OMS reference data
+├── generator/           host-Python data generator: seed effect model, LA config, OMS reference data and orders
 │   └── sql/             DDL of the oms tables, applied by the generator
 ├── seed/                the Kaggle seed file (gzipped) and its MIT license
 ├── tests/               pytest checks, run with: uv run pytest
