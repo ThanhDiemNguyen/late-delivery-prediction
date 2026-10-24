@@ -10,3 +10,4 @@ Documents are added here as each part is built.
 |---|---|
 | [environment.md](environment.md) | The machine, every pinned image (arm64, size, idle memory), PyFlink on arm64, and the safe stop and unplug procedure |
 | [core_services.md](core_services.md) | Postgres, SeaweedFS and Kafka: what they hold, how to start them, verification, pitfalls |
+| [data_generator.md](data_generator.md) | The seed, the delivery-time model, the LA config and SLA rule, and their checks |

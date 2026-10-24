@@ -51,12 +51,16 @@ Start them with `cp .env.example .env` (then change the passwords) and
 .
 ├── README.md            this file: domain, architecture, structure, links to docs
 ├── docker-compose.yaml  every service, grouped by Compose profile (core so far)
+├── generator/           host-Python data generator: seed effect model, LA config
+├── seed/                the Kaggle seed file (gzipped) and its MIT license
+├── tests/               pytest checks, run with: uv run pytest
 ├── infra/
 │   └── postgres/init/   SQL run on the first start of Postgres (creates the databases)
 ├── scripts/
 │   └── safe-shutdown.sh stop everything, quit Docker Desktop and eject the SSD
 ├── docs/                one document per major part, linked from docs/README.md
-├── pyproject.toml       Python project settings and the ruff lint rules
+├── pyproject.toml       Python project settings, dependencies and the ruff lint rules
+├── uv.lock              exact versions of every Python dependency
 ├── .env.example     template for the local .env file (the real .env is never committed)
 └── .gitignore       files and folders that git must never track
 ```
@@ -67,7 +71,8 @@ Start them with `cp .env.example .env` (then change the passwords) and
 - Docker Desktop with 16 GB memory, 8 CPUs, 2 GB swap and an 800 GB disk limit. Its disk image is
   on an external SSD; run `scripts/safe-shutdown.sh` before unplugging it
   ([procedure](docs/environment.md#start-stop-and-unplug-safely)).
-- [uv](https://docs.astral.sh/uv/) for Python tools. The linter runs with `uvx ruff check .`.
+- [uv](https://docs.astral.sh/uv/) for Python. `uv sync` installs Python 3.10 and the
+  dependencies, `uv run pytest` runs the tests, and `uvx ruff check .` runs the linter.
 
 ## Documentation
 

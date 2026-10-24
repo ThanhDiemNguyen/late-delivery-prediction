@@ -7,7 +7,14 @@ version = "0.1.0"
 description = "EDAI-1 data platform for LastLeg Logistics, a fictional Los Angeles last-mile carrier"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
-dependencies = []
+dependencies = [
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 110
@@ -20,3 +27,8 @@ select = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
