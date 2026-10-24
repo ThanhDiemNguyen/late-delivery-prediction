@@ -241,12 +241,12 @@ DataHub's Trino recipe ran again afterwards. `fact_courier_activity_hourly` now 
 **At full scale.** DP2 runs one day at a time. The pieces that grow with the data were measured
 at 100 GB ([spark_optimization.md](spark_optimization.md),
 [storage_optimization.md](storage_optimization.md)). The projection for one full-scale day assumes
-that the cost grows with the rows, and the one-day trials agree in size:
+that the ping part of the cost grows with the rows:
 
 | Step | Measured at full scale | One full-scale day (projected) |
 |---|---|---:|
 | ping dedup (window) | 73.3 s for 7 days | about 10 s |
-| pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days | about 6 s of join, plus the scans |
+| pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days; one-day trials 163 to 322 s | 2 to 5 min: the join shuffles all 80.8 million orders every day, which the one-day trials measured as most of their time; the pings add about 6 s |
 | compaction and Z-order of the new pings | 443 s for 7 days | about 63 s |
 
 A daily DP2 at full scale therefore adds minutes, not hours, to the slice's 4.4 minutes. A full
