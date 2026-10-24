@@ -3,7 +3,8 @@
 Each section has five parts:
 
 - the problem in the generated data;
-- what the Spark UI shows about it;
+- what the Spark UI shows about it (the skew join and the duplicates; the schema problem shows in
+  the data, as missing columns, and not in the UI);
 - the methods tried;
 - the measured results;
 - how the chosen method runs in the Airflow pipelines.
@@ -83,7 +84,16 @@ after 23.6 minutes (1,413 s), during the second attempt.
 
 ![Baseline stages: the join stage failed at 121 of 200 tasks](images/spark/skew-baseline-stages.png)
 
-![Baseline join stage: the successful tasks and the failed ones](images/spark/skew-baseline-join-stage.png)
+The join stage's task table, sorted by status, shows the skew directly. Task 42 ran for 4.9 minutes,
+read 10.9 GiB and 1,461,775,245 records of shuffle, and spilled 54.1 GiB in memory and 11 GiB to
+disk before `java.lang.OutOfMemoryError: Java heap space`. Every task that finished read about
+139 MiB and 17.6 million records in 10 to 12 s. The other failed tasks are the consequence: when
+executor 0 exited, the tasks it was running failed with `ExecutorLostFailure`, and the tasks that
+needed its shuffle files with `FetchFailed`.
+
+![Baseline join stage, tasks sorted by status: task 42 failed with OutOfMemoryError after reading 10.9 GiB, against about 139 MiB for every finished task](images/spark/skew-baseline-failed-tasks.png)
+
+![Baseline join stage: the summary of the 121 tasks that finished, each about 140 MiB; the NULL partition is not among them](images/spark/skew-baseline-join-stage.png)
 
 ![Baseline executors: executor 0 lost](images/spark/skew-baseline-executors.png)
 
@@ -107,7 +117,7 @@ into 81, and its extra planning makes it the slowest here.
 
 | Method | Result | Wall time | Join tasks | Task time, median / slowest | Shuffle read per task, median / largest | Ping shuffle written | Spill, memory / disk |
 |---|---|---:|---:|---:|---:|---:|---:|
-| baseline | **out of memory** on the NULL task; stopped | (23.6 min, not finished) | 200 | | 146 MB / (the NULL task failed) | 36.6 GiB | |
+| baseline | **out of memory** on the NULL task; stopped | (23.6 min, not finished) | 200 | | 146 MB / (the NULL task failed) | 39.3 GB (36.6 GiB, the same map stage as AQE) | |
 | aqe | finished | **1,079.6 s (18.0 min)** | 283 | 8.6 s / 14.2 s | 146.5 MB / 148.9 MB | 39.3 GB | 189.3 / 38.1 GB |
 | isolate_nulls | finished | **1,148.2 s (19.1 min)** | 200 (+1,074 for the NULL rows) | 0.7 s / 14.8 s | — / 147.5 MB | **27.8 GB** | **134.2 / 27.1 GB** |
 | salt_nulls, 64 salts | **out of memory** (tasks 21 and 149); stopped | (24.8 min, not finished) | 200 | | | | |
@@ -149,7 +159,8 @@ DP2 keeps **NULL isolation**, with AQE also on (`spark.sql.adaptive.enabled` is 
 Spark 3.5, and the platform does not turn it off).
 
 - **DP2 runs one day at a time.** One full-scale day has a NULL partition of about 64 MB of
-  shuffle: the one-day trial measured a largest task of 64 MB against a median of 8 MB. AQE only
+  shuffle: the one-day trial measured a largest task of 64 MB against a median of 8 MB (see the
+  trials below). AQE only
   splits a partition larger than 256 MB and 5 times the median
   (`spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes`, `skewedPartitionFactor`), so
   its rule would not apply to a daily batch. NULL isolation removes the NULL rows from the shuffle
@@ -158,6 +169,22 @@ Spark 3.5, and the platform does not turn it off).
   holds the data too.
 - **AQE stays on** for the joins NULL isolation does not cover. It is the simplest fix when a
   whole history is rebuilt at once: at 100 GB it finished first, with no code change.
+
+**The one-day trials (2026-10-24).** Before the sweeps, each method ran on one full-scale export
+date. All four matched 16,639,434 pings, so the four joins agree. Their times are not a fair
+comparison: the trials ran from 02:27 to 02:48 PT, while the generator was still writing the
+last export dates to the same disk.
+
+| Method | Wall time, one day |
+|---|---:|
+| baseline | 321.6 s |
+| aqe | 395.2 s |
+| isolate_nulls | 294.3 s |
+| salt_nulls (64 salts) | 164.2 s |
+
+Most of each trial is the order side: every method shuffles all 80.8 million orders, whatever the
+number of ping days. That is why one day of NULL isolation took 294 s, about a quarter of its
+1,148 s for 183 days.
 
 **Integration into Airflow.** `jobs/dp2_gold_facts.py` joins the silver pings to `fact_delivery`
 on `trip_id`, to count the minutes on trips that ended late (`late_trip_min` in
@@ -188,6 +215,14 @@ The DP2 suite then passed 62 of 62 expectations for 2024-11-27, the new one incl
 **In Airflow (2026-10-24).** The `dp2_transform_validate` run for 2024-11-29 was green in 266 s.
 `gold_facts` took 41.9 s, the suite passed 62 of 62, and `publish_assertions` sent the new check to
 DataHub with the others. The run is described in [airflow.md](airflow.md#run-after-the-100-gb-work-2026-10-24).
+
+That run had no new ping date, because DP1 did not run before it. So `gold_facts` merged no new
+activity hours, and the NULL-isolation join above did not execute in it; nor did the per-date
+`OPTIMIZE` of silver ([storage_optimization.md](storage_optimization.md)). Both ran in the manual
+rebuilds of 2026-10-24: `dp2_gold_facts.py --rebuild` above, and a `dp2_silver.py` rebuild that
+went through the new compaction step. The run
+proves the DAG, the suite with the new `late_trip_min` check, and the DataHub publication. In a
+daily run that brings a new ping date, the same task code runs the join and the compaction.
 
 ## Schema evolution: app v2 pings next to v1 (`jobs/schema_evolution_demo.py`)
 
@@ -277,6 +312,20 @@ time and the shuffle and spill summed over its stages.
 - **But it is 64% slower here.** Each day is read three times, for the key count, the anti-join
   and the semi-join. The seven days also run one after another, and every day's job is too small
   to keep the 4 cores busy.
+
+**What the Spark UI shows.** The window method has one big shuffle: stage 29 reads the 7 days
+(166,023,384 rows, 294.1 MiB of Parquet) in 34 tasks and writes 2,019.7 MiB of shuffle for the
+`row_number()` window, spilling 3.6 GiB in memory and 914.6 MiB to disk. Its tasks are even, 4 s
+at the median and 10 s at most, so there is no skew to fix here, only the volume.
+
+![dedup_window, stage 29: 2,019.7 MiB of shuffle written and 3.6 GiB spilled for one window over all 7 days](images/spark/dedup-window-shuffle-stage.png)
+
+The targeted method has many small stages instead: for each day, one stage reads the two key
+columns (3.2 MiB) and shuffles the key counts, and two more read the whole day again (42 MiB each)
+for the anti-join and the semi-join. Each stage has 4 to 9 tasks and lasts 1 to 7 s, so the
+4 cores wait between stages. That is where most of its extra 47 s goes.
+
+![dedup_targeted, all stages: per day, a key-count stage of 3.2 MiB, then two more reads of the 42 MiB day](images/spark/dedup-targeted-stages.png)
 
 A ping has 10 to 12 narrow columns, so shuffling whole rows costs less than reading the files
 from SeaweedFS again.
