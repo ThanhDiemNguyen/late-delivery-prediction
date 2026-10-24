@@ -37,7 +37,7 @@ with DAG(
         inlets=FEATURES,
     )
     incremental = spark_job("validate_incremental", "check_cdf.py", [], retries=0, inlets=FEATURES + GOLD_IN)
-    # A task that runs (not an EmptyOperator, which the scheduler skips), so DataHub gets its name too.
+    # A task that runs: the scheduler marks an EmptyOperator done without running it, so DataHub got no name.
     passed = BashOperator(task_id="checks_passed", bash_command="echo validate_suite and validate_incremental passed")
     features >> [suite, incremental] >> passed
     suite >> publish_assertions("dp3", "validate_suite")

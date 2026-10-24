@@ -237,5 +237,9 @@
 <text x="1320" y="1020" font-size="11.5" fill="#465165">An arrow carries the data named on it, from the unit that sends it to the unit that receives it.</text>
 <text x="1320" y="1037" font-size="11.5" fill="#465165">B1 and S2 carry no data: they point from the caller to the unit it calls.</text>
 <text x="1320" y="1054" font-size="11.5" fill="#465165">The dashed box is a support unit whose arrows are left out: the Airflow webserver, which reads</text>
-<text x="1320" y="1071" font-size="11.5" fill="#465165">the airflow database and shows the DAG runs.</text>
+<text x="1320" y="1071" font-size="11.5" fill="#465165">the airflow database and shows the DAG runs. Also left out: each service's own database in</text>
+<text x="1320" y="1088" font-size="11.5" fill="#465165">Postgres (Airflow, Hive Metastore, DataHub), DataHub's internal Kafka topics, and the scan</text>
+<text x="1320" y="1105" font-size="11.5" fill="#465165">producer's reads of a week's export scans and their orders, from which it builds the events.</text>
+<text x="1320" y="1122" font-size="11.5" fill="#465165">Spark and Flink are each two containers that deploy together (master and worker, jobmanager</text>
+<text x="1320" y="1139" font-size="11.5" fill="#465165">and taskmanager).</text>
 </svg>

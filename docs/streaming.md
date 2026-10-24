@@ -250,7 +250,9 @@ would hide the problem that the baseline is meant to show.
 - **Exact:** a window is exact when all three counts equal the truth.
 - **Over- and under-counted:** a window is over-counted when a count is higher than the truth,
   and under-counted when one is lower. An output window that the truth does not have counts as
-  over-counted. A truth window with no output counts as under-counted.
+  over-counted. A truth window with no output counts as under-counted. A window can be both, when
+  one of its three counts is too high and another too low, so exact + over + under can be more
+  than the windows.
 - **Conservation:** the scans in the windows plus the scans in `scans-late` must equal the records
   read. Every record either lands in a window or reaches the side output.
 - **Simulated drops:** the scans that a watermark updated after every record would drop. The
@@ -395,8 +397,8 @@ this rate the watermark moves almost record by record.
 `Records Received` of `late scans` is the same number.
 
 The screenshot below shows the completed jobs. The two cancelled baseline jobs are the first
-attempts. They replayed a whole full-scale week at 1,000 records per second, about 2 hours a run,
-and were stopped:
+attempts. They replayed a whole full-scale week at 1,000 records per second, which would have
+taken about 2 hours a run. They were stopped after 10 min 38 s and 2 min 26 s:
 
 ![Flink completed jobs: baseline, lateness and dedup finished on one full-scale day; two cancelled full-week baseline attempts](images/streaming/flink-completed-jobs.png)
 

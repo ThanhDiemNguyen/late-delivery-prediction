@@ -45,9 +45,9 @@ so the executors on `spark-worker` can connect back to the driver.
 
 **Who sees the credentials.** Only `airflow-init` reads `.env` (`env_file`). The script
 `airflow/setup_airflow.py` stores the source credentials as Airflow connections in the `airflow`
-database, encrypted with `AIRFLOW_FERNET_KEY`. The webserver and the scheduler get two values
-from Compose instead. One is the metadata database URL (`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`),
-which uses the same Postgres login. The other is the Fernet key.
+database, encrypted with `AIRFLOW_FERNET_KEY`. The webserver and the scheduler get three values
+from Compose instead. The first is the metadata database URL (`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`),
+which uses the same Postgres login. The others are the Fernet key and the webserver's secret key.
 
 The DAG code holds no password. A DAG reads a password through a connection id, for example
 `{{ conn.oms_postgres.password }}` in a templated field. If the init runs again, it updates the
@@ -61,10 +61,15 @@ same entries.
 | `spark_lakehouse` | spark | `spark://spark-master:7077`, client mode |
 | `datahub_rest_default` | datahub-rest | `http://datahub-gms:8080`, where the DataHub plugin and `publish_assertions` send metadata |
 
-Every Spark task gets its hosts and logins from these connections, through templated `env_vars`
-in `airflow/dags/lakehouse_tasks.py`. The entry `OMS_JDBC_URL` and the login come from
-`oms_postgres`, and the S3 keys come from `lakehouse_s3`. The `warehouse` task writes to `dwh` with
-`DWH_JDBC_URL` and the login of `dwh_postgres`.
+Every Spark task gets the settings of its pipeline from Airflow, through templated `env_vars` in
+`airflow/dags/lakehouse_tasks.py`. The bucket names come from the variables below. `OMS_JDBC_URL`
+and the Postgres login come from `oms_postgres`, and the driver's S3 keys from `lakehouse_s3`. The
+`warehouse` task writes to `dwh` with `DWH_JDBC_URL` and the login of `dwh_postgres`.
+
+The cluster's own settings are not in Airflow. The file `infra/spark/conf/spark-defaults.conf`
+sets the S3 endpoint, the Hive Metastore address and the warehouse folder. They apply to every
+Spark application, also to jobs started by hand. The executors on `spark-worker` get their S3 keys from Compose, because
+`spark-submit` passes `env_vars` to the driver only.
 
 | Variable | Value | Used by |
 |---|---|---|
@@ -81,6 +86,9 @@ Airflow reads it when it parses the DAG file, before it renders any template. In
 4-core worker, and two drivers would starve each other.
 
 ### Checks (2026-10-23)
+
+This output is older than the `datahub_rest_default` connection and the removal of
+`period_start`; the checks after the review fixes are below.
 
 ```text
 $ docker compose exec airflow-scheduler airflow connections list -o json   # printed without secrets
@@ -323,7 +331,7 @@ that the ping part of the cost grows with the rows:
 
 | Step | Measured at full scale | One full-scale day (projected) |
 |---|---|---:|
-| ping dedup (window) | 73.3 s for 7 days | about 10 s |
+| ping dedup (window) | 110.7 s for 7 days | about 16 s |
 | pings LEFT JOIN trips, NULL isolation | 1,148 s for 183 days; 294 s in the one-day trial ([spark_optimization.md](spark_optimization.md#the-choice-for-the-pipeline)) | 2 to 5 min: the join shuffles all 80.8 million orders every day, which is most of the one-day trial's time; the pings add about 6 s |
 | compaction and Z-order of the new pings | 443 s for 7 days | about 63 s |
 

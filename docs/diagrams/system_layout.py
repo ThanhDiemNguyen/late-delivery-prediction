@@ -118,6 +118,10 @@ LAYOUT = {
         "An arrow carries the data named on it, from the unit that sends it to the unit that receives it.",
         "B1 and S2 carry no data: they point from the caller to the unit it calls.",
         "The dashed box is a support unit whose arrows are left out: the Airflow webserver, which reads",
-        "the airflow database and shows the DAG runs.",
+        "the airflow database and shows the DAG runs. Also left out: each service's own database in",
+        "Postgres (Airflow, Hive Metastore, DataHub), DataHub's internal Kafka topics, and the scan",
+        "producer's reads of a week's export scans and their orders, from which it builds the events.",
+        "Spark and Flink are each two containers that deploy together (master and worker, jobmanager",
+        "and taskmanager).",
     ]},
 }

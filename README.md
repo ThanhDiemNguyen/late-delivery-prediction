@@ -17,7 +17,7 @@ All data in this repository is synthetic, and the company is fictional.
 
 ## Business domain
 
-LastLeg Logistics delivers parcels from about 40 hubs across Los Angeles.
+LastLeg Logistics delivers parcels from 40 hubs across Los Angeles.
 
 - **Prediction moment:** the `picked_up` scan, when a courier leaves the hub with the parcel. At
   that moment the courier, vehicle, traffic, weather and hub load are known, and the dispatcher can
@@ -38,7 +38,9 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 
 ![Overview: the batch steps DP1 to DP3 each write a lakehouse zone (bronze, silver, gold, features) that the next step reads, the warehouse load fills dwh, Trino serves every zone; below them the scan stream through Kafka and Flink, and the Airflow, DataHub and storage services; the two novel ideas in red](docs/images/architecture/overview.png)
 
-Each batch step writes one zone of the lakehouse, and the next step reads it from there. DP1
+The overview is a map of the pipeline steps and the zones they write. The system diagram below is
+the deployment diagram, with one box per deployable unit and numbered flows. Each batch step
+writes one zone of the lakehouse, and the next step reads it from there. DP1
 copies the sources into bronze, DP2 builds silver, gold and the `dwh` warehouse, and DP3 builds
 the `feat_` tables. The stream counts the deliveries per hub in 5-minute windows. The two novel
 ideas are in red: the H3 delivery zones from Apache Sedona, and the incremental DP3 from Delta's
@@ -48,12 +50,18 @@ Change Data Feed.
 
 ![System architecture: every deployable unit of the platform in its Compose profile or on the Mac, and the numbered data flows between them](docs/images/architecture/system.png)
 
-Every box is a deployable unit: a container of one Compose profile (its tag) or a process on the
-Mac. Each arrow carries the data named on it, from the unit that sends the data to the unit that
-receives it. B1 and S2 carry no data: they point from the caller to the unit it calls. Each flow
-has its own colour and its own numbers, and two arrows cross only where the line shows a gap.
+Every box is a deployable unit: a container of one Compose profile (its tag), or a process on the
+Mac. The Spark box and the Flink box each stand for two containers that deploy together: master
+and worker, and jobmanager and taskmanager. Each arrow carries the data named on it, from the
+unit that sends the data to the unit that receives it. B1 and S2 carry no data: they point from
+the caller to the unit it calls. Each flow has its own colour and its own numbers, and two arrows
+cross only where the line shows a gap.
+
 The dashed box is a support unit whose arrows are left out: the Airflow webserver, which reads the
-`airflow` database and shows the DAG runs.
+`airflow` database and shows the DAG runs. Three more kinds of arrows are left out. The first is
+each service's own database in Postgres (Airflow, Hive Metastore, DataHub), and the second is
+DataHub's internal Kafka topics. The third is the scan producer's reads of a week's export scans
+and their orders, from which it builds the events.
 
 The script [`docs/diagrams/draw.py`](docs/diagrams/draw.py) draws both pictures (stdlib Python;
 PNG through headless Chrome). It reads two sources for each picture. The topology is in
