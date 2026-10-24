@@ -3,6 +3,9 @@
 Each part shows the code of the optimization, the queries it serves, and the measured difference
 against the same data without it.
 
+- [Warehouse: indexes on `dwh.obt_delivery`](#warehouse-indexes-on-dwhobt_delivery)
+- [Lakehouse: compaction and Z-order on the pings](#lakehouse-compaction-and-z-order-on-the-pings)
+
 ## Warehouse: indexes on `dwh.obt_delivery`
 
 `obt_delivery` is the one big table for analysts: one wide row per order of the last 30 days
@@ -61,3 +64,84 @@ in a transaction that is rolled back, so the warehouse is not changed.
 
 The relationships of the warehouse tables (declared primary and foreign keys) are drawn in
 [schema_design.md](schema_design.md#warehouse-dwh-postgres-written-by-dp2).
+
+## Lakehouse: compaction and Z-order on the pings
+
+`silver.stg_courier_pings` is partitioned by `ping_date`. Partitioning already lets a query of one
+day read only that day's folder. What partitioning does not fix is how many files a day holds, and
+how the rows are spread over them. A job writes one file per task into every date its task holds
+rows for. After DP2's dedup window (200 shuffle partitions), the slice's silver table had 9,150
+files for 1.68 GB: 50 files of about 180 kB in each date.
+
+**The benchmark** (`jobs/lakehouse_layout_benchmark.py`) writes one full-scale week of pings,
+166,023,384 rows, the way a 200-task job writes it. Then it rewrites the table twice:
+
+```python
+pings.repartition(200).write.format("delta").partitionBy("ping_date").save(TABLE)   # 200 files a date
+table = DeltaTable.forPath(spark, TABLE)
+table.optimize().executeCompaction()          # OPTIMIZE: files of up to 128 MB in each date
+table.optimize().executeZOrderBy("courier_id")  # OPTIMIZE ZORDER BY (courier_id)
+table.vacuum(0)                               # VACUUM: delete the files the rewrites replaced
+```
+
+- **`OPTIMIZE` (compaction)** rewrites each date's small files into a few large ones. A query then
+  opens fewer files, and each file has fewer footers to read and better compression.
+- **`ZORDER BY (courier_id)`** sorts the rows by courier as it rewrites them. Each file then holds
+  a narrow range of couriers, and Delta records each file's minimum and maximum `courier_id`. A
+  query for one courier skips every file whose range cannot hold it.
+- **`VACUUM`** deletes the files the two rewrites replaced. Until then they stay in storage, so
+  time travel can read the old versions.
+
+The two queries run twice after each step, and the second run counts. Their files and bytes read
+come from the Spark SQL metrics of the `Scan parquet` node:
+
+```sql
+SELECT count(*), round(avg(speed_kmh), 2) FROM pings WHERE ping_date = '2024-06-03' AND courier_id = 15162  -- one courier, one day
+SELECT ping_date, count(*) FROM pings WHERE hub_id = 17 GROUP BY ping_date                                  -- one hub, one week
+```
+
+**Measured on the full-scale week (2026-10-24):**
+
+| Step (time it took) | Files in the table | One courier, one day | One hub, one week |
+|---|---:|---|---|
+| after the write (338.8 s) | 1,400 (4.83 GB) | 200 files, 657.3 MiB, 23,685,732 rows scanned, **2.83 s** | 1,400 files, 4.5 GiB, **23.52 s** |
+| after `OPTIMIZE` (181.1 s) | 42 (4.58 GB) | 6 files, 623.5 MiB, 23,682,660 rows, **1.34 s** | 42 files, 4.3 GiB, **2.44 s** |
+| after `ZORDER BY (courier_id)` (262.0 s) | 28 (4.27 GB) | **1 file, 148.6 MiB, 3,600,000 rows, 0.62 s** | 28 files, 4.0 GiB, 0.75 s |
+| after `VACUUM` (23.8 s) | 28 (4.27 GB) | 1 file, 148.6 MiB, 0.39 s | 28 files, 4.0 GiB, 0.89 s |
+
+- **Compaction fixes the small files.** The week query opens 42 files instead of 1,400, and runs
+  in 2.44 s instead of 23.52 s, 9.6 times faster. Most of that time was spent opening and listing
+  1,400 small objects in SeaweedFS.
+- **Z-order lets the courier query skip files.** Within the date it reads 1 file of 6, and
+  3.6 million rows instead of 23.7 million. That is 0.62 s against 1.34 s after compaction alone,
+  and 2.83 s at the start: 4.6 times faster overall.
+- **Z-order on `courier_id` does not skip files for the hub query.** It still reads every file of
+  the week. Its smaller bytes come from the better compression of sorted data.
+- **The rewrites are not free.** `OPTIMIZE` and Z-order together took 7.4 minutes for a week, and
+  the table shrank by 12% (4.83 GB to 4.27 GB), because sorted columns compress better.
+
+**In the pipeline.** DP2 now compacts each date of `stg_courier_pings` right after it writes it,
+ordered by courier (`jobs/dp2_silver.py`):
+
+```python
+save(pings, "stg_courier_pings", partition_by="ping_date")
+listed = ", ".join(f"DATE'{d}'" for d in dates)
+spark.sql(f"OPTIMIZE silver.stg_courier_pings WHERE ping_date IN ({listed}) ZORDER BY (courier_id)")
+```
+
+On the slice's own silver table (`lakehouse_layout_benchmark.py --silver`, then a DP2 silver
+rebuild in 6.4 minutes that went through the new step):
+
+| `silver.stg_courier_pings` (slice) | Files | Size | One courier, one day | One hub, one week |
+|---|---:|---:|---|---|
+| before | 9,150 | 1.68 GB | 50 files, 7.5 MiB, 0.76 s | 350 files, 52.6 MiB, 1.42 s |
+| after `OPTIMIZE ZORDER BY (courier_id)` | 183 | 1.17 GB | 1 file, 5.2 MiB, 0.25 s | 7 files, 36.1 MiB, 0.53 s |
+
+A slice day fits in one file, so here the gain is the compaction: 50 times fewer files, a table
+30% smaller, and both queries about 3 times faster. The skipping inside a day shows at full scale,
+in the benchmark above.
+
+**Pitfall: an executor killed by the VM.** One benchmark run lost its executor during the Z-order,
+with exit code 137 (SIGKILL), not Java's 52. The kernel had killed it: every profile was running,
+and the Docker VM ran short of memory. With Flink and Trino stopped (`docker compose stop`), the
+rerun finished.

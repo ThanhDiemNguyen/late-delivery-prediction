@@ -183,7 +183,11 @@ def silver_pings(spark: SparkSession, rebuild: bool) -> None:
         )
     )
     save(pings, "stg_courier_pings", partition_by="ping_date")
-    print(f"silver.stg_courier_pings: {len(dates)} dates processed ({dates[0]} to {dates[-1]})")
+    # The window's shuffle leaves about 50 small files in each date. Compact the new dates into
+    # files ordered by courier, so a courier's day sits in one file (docs/storage_optimization.md).
+    listed = ", ".join(f"DATE'{d}'" for d in dates)
+    spark.sql(f"OPTIMIZE silver.stg_courier_pings WHERE ping_date IN ({listed}) ZORDER BY (courier_id)")
+    print(f"silver.stg_courier_pings: {len(dates)} dates processed ({dates[0]} to {dates[-1]}), compacted")
 
 
 def silver_scans(spark: SparkSession, rebuild: bool) -> None:
