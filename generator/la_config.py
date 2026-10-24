@@ -5,6 +5,17 @@ file decides how often each factor occurs in Los Angeles, and how much time a pa
 The numbers and their reasons are in docs/data_generator.md.
 """
 
+import pandas as pd
+
+# The generated period: 183 days of local LA time. Timestamps are stored in UTC.
+TIME_ZONE = "America/Los_Angeles"
+PERIOD_START = pd.Timestamp("2024-06-01", tz=TIME_ZONE).tz_convert("UTC")
+PERIOD_END = pd.Timestamp("2024-12-01", tz=TIME_ZONE).tz_convert("UTC")  # exclusive
+
+# Full-scale counts. The 1% development slice uses --scale 0.01.
+FULL_COURIERS = 20_000
+FULL_CUSTOMERS = 5_000_000
+
 TRAFFIC_MIX = {"Low": 0.25, "Medium": 0.25, "High": 0.15, "Jam": 0.35}
 WEATHER_MIX = {"Sunny": 0.62, "Cloudy": 0.14, "Fog": 0.12, "Windy": 0.07, "Stormy": 0.05}
 VEHICLE_MIX = {"van": 0.45, "car": 0.40, "e-bike": 0.15}

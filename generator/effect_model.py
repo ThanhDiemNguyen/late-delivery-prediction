@@ -51,7 +51,7 @@ def load_seed(path: Path = SEED_PATH) -> pd.DataFrame:
 
     Returns:
         One row per usable order, with columns traffic, weather, vehicle, area (LA names),
-        km (store to drop), rating and minutes (the seed's Delivery_Time).
+        km (store to drop), rating, age (the courier's) and minutes (the seed's Delivery_Time).
     """
     raw = pd.read_csv(path)
     for col in ("Traffic", "Weather", "Vehicle", "Area"):
@@ -72,6 +72,7 @@ def load_seed(path: Path = SEED_PATH) -> pd.DataFrame:
             "area": raw.Area.replace(SEED_RENAMES["area"]),
             "km": haversine_km(raw.Store_Latitude, raw.Store_Longitude, raw.Drop_Latitude, raw.Drop_Longitude),
             "rating": raw.Agent_Rating.astype(float),
+            "age": raw.Agent_Age.astype(int),
             "minutes": raw.Delivery_Time.astype(float),
         }
     )
