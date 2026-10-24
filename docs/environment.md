@@ -144,6 +144,13 @@ Decisions:
   stage to compile pemja's JNI code. 1.20.5 pins `pemja` 0.5.7, which has one.
 - **Keep the Java 17 Flink image** and install `libpython3.10` in the runtime stage.
 - **No `platform: linux/amd64` fallback is needed** for Flink.
+- **In the session cluster, `flink-python` goes in `lib/` and pemja is parent-first.** The test
+  above ran one job per JVM. On a TaskManager, every job loads pemja through its own classloader,
+  and the JVM lets a native library load in only one classloader. The second thread-mode job then
+  failed with the same `NoSuchFieldException: loadedLibraryNames`, because pemja's fallback for
+  that case reads a field Java 17 removed. With the jar copied to `lib/` and
+  `classloader.parent-first-patterns.additional: pemja.`, three jobs in a row ran
+  ([streaming.md](streaming.md)).
 
 ## Start, stop and unplug safely
 

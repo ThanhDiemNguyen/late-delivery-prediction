@@ -144,6 +144,12 @@ services:
         $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic parcel-scans-replay --partitions 1 --replication-factor 1
         $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic hub-delivery-5m --partitions 3 --replication-factor 1
         $$T --bootstrap-server kafka:19092 --create --if-not-exists --topic scans-late --partitions 1 --replication-factor 1
+        # The scan records carry their 2024 event time as the record timestamp. Time-based retention
+        # judges a segment by those timestamps, so the 7-day default deletes them minutes after they
+        # are written. The producer and the Flink runs empty these topics themselves.
+        for t in parcel-scans parcel-scans-replay hub-delivery-5m scans-late; do
+          /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:19092 --alter --entity-type topics --entity-name $$t --add-config retention.ms=-1
+        done
         $$T --bootstrap-server kafka:19092 --list
 
   # ---------- lakehouse: catalog and Spark (profile batch; the metastore also serves query) ----------
@@ -458,6 +464,51 @@ services:
       interval: 15s
       retries: 30
       start_period: 60s
+
+  # ---------- streaming: Flink session cluster (profile stream, on top of core) ----------
+  # PyFlink jobs in ./flink/jobs are submitted from the jobmanager:
+  #   docker compose exec flink-jobmanager flink run -py /opt/flink/jobs/scan_windows.py --mode baseline
+  # They read and write Kafka at kafka:19092.
+  flink-jobmanager:
+    build:
+      context: ./infra/flink
+      dockerfile: Dockerfile.naive
+    image: lastleg/flink:1.20.5-naive
+    profiles: [stream]
+    command: jobmanager
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: &flink-properties |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: 1024m
+        taskmanager.memory.process.size: 2048m
+        taskmanager.numberOfTaskSlots: 1
+        parallelism.default: 1
+        python.executable: python3
+        python.client.executable: python3
+        classloader.parent-first-patterns.additional: pemja.   # one pemja per JVM: see infra/flink/Dockerfile.naive
+    ports:
+      - "127.0.0.1:8084:8081"   # Flink UI (8081 on the Mac is the Spark worker UI)
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8081/overview >/dev/null"]
+      interval: 10s
+      retries: 12
+
+  flink-taskmanager:
+    image: lastleg/flink:1.20.5-naive
+    profiles: [stream]
+    command: taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: *flink-properties
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs:ro
 
 volumes:
   postgres_data:

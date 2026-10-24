@@ -107,3 +107,8 @@ Further checks:
   10 s killed it (exit 137). Measurements are in [environment.md](environment.md#decisions-and-pitfalls).
 - **Topics are explicit.** `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`, so a typo in a topic name
   fails loudly instead of creating a new topic.
+- **No time-based retention on the four stream topics.** Their records carry the 2024 event time
+  as the record timestamp, and the 7-day default deletes a segment whose timestamps are older, a
+  few minutes after it is written. `kafka-init` sets `retention.ms=-1` on them (an alter, so it is
+  safe to rerun). The producer and the Flink runs empty them before each run
+  ([streaming.md](streaming.md)).
