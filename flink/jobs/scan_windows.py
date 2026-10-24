@@ -9,6 +9,8 @@ delivered scans, and the delivered scans after promised_ts, and goes to hub-deli
 scan whose window has already closed when it arrives goes to scans-late.
 
     baseline   the window closes at the watermark: no allowed lateness, no dedup
+    lateness   the window keeps its scans for 20 minutes after the watermark passes its end; each
+               late scan in that time fires it again with the updated counts
 """
 
 import argparse
@@ -29,6 +31,7 @@ BOOTSTRAP = "kafka:19092"
 SOURCE, OUTPUT, LATE = "parcel-scans-replay", "hub-delivery-5m", "scans-late"
 WINDOW = Time.minutes(5)
 OUT_OF_ORDERNESS = Duration.of_seconds(10)
+ALLOWED_LATENESS_MS = {"baseline": 0, "lateness": 20 * 60_000}  # scans arrive at most 20 minutes late
 
 # One scan as a tuple: the fields the windows need, in this order.
 FIELDS = ["scan_id", "order_id", "hub_id", "scan_type", "scan_ts", "promised_ts", "sent_ts"]
@@ -94,7 +97,7 @@ def kafka_sink(topic: str) -> KafkaSink:
 def main() -> None:
     """Build and run the job for one mode."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=["baseline"], required=True)
+    parser.add_argument("--mode", choices=sorted(ALLOWED_LATENESS_MS), required=True)
     parser.add_argument("--stop-offset", type=int, required=True, help="offset after the last record to read")
     parser.add_argument("--watermark-interval-ms", type=int, default=1)
     args = parser.parse_args()
@@ -123,6 +126,7 @@ def main() -> None:
     counts = (
         scans.key_by(lambda scan: scan[HUB_ID], key_type=Types.INT())
         .window(TumblingEventTimeWindows.of(WINDOW))
+        .allowed_lateness(ALLOWED_LATENESS_MS[args.mode])
         .side_output_late_data(late)
         .process(CountScans(args.mode), output_type=Types.STRING())
     )

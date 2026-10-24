@@ -12,6 +12,7 @@ the truth recomputed from the export Parquet.
 | Mode | What the job does | Earns |
 |---|---|---|
 | `baseline` | windows close at the watermark; late scans go to a side output | E16 |
+| `lateness` | windows keep their scans 20 minutes past the watermark; each late scan fires the window again | E17 |
 
 ## Topics
 
@@ -147,6 +148,7 @@ late = OutputTag("late-scans", scan_type())
 counts = (
     scans.key_by(lambda scan: scan[HUB_ID], key_type=Types.INT())                         # 3
     .window(TumblingEventTimeWindows.of(WINDOW))                                         # 4
+    .allowed_lateness(ALLOWED_LATENESS_MS[args.mode])                                    # 5
     .side_output_late_data(late)                                                         # 5
     .process(CountScans(args.mode), output_type=Types.STRING())                          # 6
 )
@@ -165,9 +167,11 @@ counts.get_side_output(late).map(as_json, output_type=Types.STRING()).sink_to(ka
 4. **Tumbling event-time windows of 5 minutes:** a scan goes to the window `[k × 5 min,
    (k + 1) × 5 min)` that holds its `scan_ts`. Windows start on the epoch's 5-minute marks, which
    are also :00, :05, ... in Los Angeles.
-5. **Late data goes to a side output,** not silently away. A scan is late when its window has
-   already fired: the window's last millisecond, plus the allowed lateness (0 in the baseline), is
-   at or behind the watermark.
+5. **Allowed lateness, then the side output.** After a window fires, `allowed_lateness` keeps
+   its scans for that long past the watermark: 0 in `baseline`, 20 minutes in `lateness`. A scan
+   that arrives in that time is added, and the window fires again with the updated counts. A scan
+   that arrives later than that goes to the side output instead of silently away. That is when
+   the window's last millisecond, plus the allowed lateness, is at or behind the watermark.
 6. **`CountScans` runs when the watermark passes the window's end.** It gets every scan of the
    window and counts three things: the scans, the `delivered` scans, and the `delivered` scans
    after `promised_ts`. Each firing is one JSON record, with the watermark at that moment.
@@ -254,6 +258,35 @@ The Flink total is 83,460 − 5,546 dropped + 1,252 retries = 79,166.
 - **Flink drops 11% to 12% fewer than the simulation,** and the count varies by up to 1.7%
   between runs. The source emits the watermark on a 1 ms timer, not after every record. So a late scan
   close to its window's end can still find the window open, depending on when the timer fired.
+
+## Lateness results (2026-10-24)
+
+`--mode lateness` passed both of its checks: 0 scans dropped, and 84,712 scans in the windows.
+
+| | Baseline (run 1) | Lateness |
+|---|---:|---:|
+| windows exact (of 32,124) | 26,650 = 82.96% | 30,929 = 96.28% |
+| over-counted | 911 | 1,195 |
+| under-counted (missing) | 4,577 (1,182) | 0 (0) |
+| dropped (Flink, simulated) | 5,546, 6,334 | 0, 0 |
+| firings | 30,942 | 36,525 |
+| scans, delivered, late-delivered | 79,166, 26,281, 4,525 | 84,712, 28,002, 4,825 |
+| job runtime | 85.1 s | 88.0 s |
+
+- **20 minutes is enough by construction.** A scan arrives at most 20 minutes after it happens.
+  The newest event time seen at that moment is no later than the arrival, so the watermark is at
+  least 10 s short of the scan's time plus 20 minutes. The scan's window, plus 20 minutes, is
+  therefore still open. The simulation agrees: 0 drops.
+- **Late firings.** 4,401 firings come after a window's first one. Each is a late scan that
+  found its window already fired. A window whose scans all came late fires for the first time on
+  its first late scan, so that firing is not an extra one: the baseline's 5,546 drops minus its
+  1,182 missing windows is 4,364, close to 4,401. The check takes each window's last firing. A consumer of
+  `hub-delivery-5m` must also treat a later record for the same hub and window as a replacement,
+  not an addition.
+- **What lateness costs.** Every window's state lives 20 minutes longer, and every late scan
+  causes another output record.
+- **Retries are still counted twice.** The 1,252 retries over-count 1,195 windows (some windows
+  get two). That is now the only difference from the truth: 84,712 − 1,252 = 83,460 scans.
 
 Flink UI screenshots of a finished run (the job graph and the job list at
 `http://127.0.0.1:8084`) go with this document.
