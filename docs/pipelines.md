@@ -217,6 +217,73 @@ Trino and `spark-sql`:
 The `picked_up` scans come from a separate source system (the courier-app export). Every rebuilt
 pickup time matching them shows that the rollover repair is right.
 
+## DP2: gold dimensions (`jobs/dp2_gold_dims.py`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_gold_dims.py                          # MERGE what is new
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_gold_dims.py --rebuild --until 2024-08-31
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/check_dim_courier.py                     # SCD2 invariants
+```
+
+| Gold table | Grain | Built from |
+|---|---|---|
+| `dim_courier` | one version of a courier (SCD type 2) | `silver.stg_courier_changes` |
+| `dim_hub` | one hub | `silver.stg_hubs` (type 1: current values) |
+| `dim_customer` | one customer | `silver.stg_customers` (type 1) |
+| `dim_date` | one local date of the period (184 days to 2024-12-01) | generated: weekday, ISO week, the two peak weeks, US holidays |
+
+### `dim_courier`, SCD type 2
+
+| Column | Meaning |
+|---|---|
+| `courier_sk` | surrogate key: the `change_id` of the audit row that opened the version, so it never changes |
+| `courier_id` | the natural key |
+| `hub_id`, `vehicle_type`, `rating`, `employment_type` | the tracked attributes, as they were during the version |
+| `valid_from_ts` | when the version started (inclusive) |
+| `valid_to_ts` | when the next version started (exclusive); `9999-12-31` while open |
+| `is_current` | true for the open version |
+
+How a version is made:
+
+1. **Hash the attributes.** Each audit row gets a SHA-256 hash of its four tracked attributes.
+2. **Compare with the previous row.** A row opens a version only when its hash differs from the
+   previous row's hash (`lag`). A rating review that left the rating unchanged opens nothing.
+3. **Close each version.** `lead` sets each version's end to the start of the next.
+
+Courier 146 has 11 audit rows and 8 versions. Its reviews 376, 576 and 829 changed nothing.
+
+**Incremental load.** New audit rows are merged with one Delta `MERGE`:
+
+- **What is new:** changes after the newest version's opening `change_id`.
+- **The comparison:** each courier's open version is put in front of its new changes, so the first
+  new change is compared with it.
+- **Two kinds of row in the `MERGE` source:**
+  - rows with a merge key close the open version: `valid_to_ts` is set to the first new start,
+    and `is_current` to false;
+  - rows without one are inserted as the new versions.
+- **Reruns:** no-op reviews after that `change_id` are compared again on the next run and open
+  nothing, so a rerun changes nothing.
+
+### Checks on the dev slice (2026-10-23)
+
+These were run against the dimension built in two ways: up to 2024-08-31 and then merged
+incrementally (481 versions, then 799), and as a full rebuild (799).
+
+| Check | Result |
+|---|---|
+| incremental build against full rebuild (`exceptAll` both ways) | 0 rows differ |
+| each courier has exactly one current version | 0 violations |
+| `valid_from_ts < valid_to_ts` | 0 violations |
+| only current versions are open-ended | 0 violations |
+| consecutive versions touch (no gap, no overlap) | 0 violations |
+| consecutive versions differ in some attribute | 0 violations |
+| `courier_sk` unique | 0 violations |
+| every courier in silver is in the dimension | 0 violations |
+| the current version equals the courier's last audit row | 0 violations |
+| audit rows that opened no version | 294 of 1,093: exactly the no-op reviews the generator wrote |
+
+`dim_hub` has 40 rows, `dim_customer` 50,000 and `dim_date` 184.
+
 ### DP2 pitfalls
 
 - **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
