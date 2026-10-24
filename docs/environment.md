@@ -155,13 +155,25 @@ corrupt that file and with it every database, bucket and topic.
 2. Start Docker Desktop.
 3. `docker compose --profile core up -d --wait` (add the other profiles you need).
 
-**Stop and unplug,** every time:
+**Stop and unplug,** every time. `scripts/safe-shutdown.sh` runs these five steps in order. If any
+step fails, it stops before ejecting and leaves the drive mounted.
+
+```bash
+scripts/safe-shutdown.sh          # asks first whether every job is finished
+scripts/safe-shutdown.sh --yes    # no question
+```
+
+By hand:
 
 1. Make sure no generator, Spark, Airflow or Flink job is still writing.
 2. From the repo: `docker compose --profile "*" stop -t 60`.
 3. Quit Docker Desktop.
 4. `lsof 2>/dev/null | grep /Volumes/T9 || echo "T9 not in use"` must print `T9 not in use`.
-5. `diskutil eject /Volumes/T9`, then unplug.
+5. Eject the physical disk, then unplug. `diskutil eject /Volumes/T9` ejects only the APFS volume,
+   which sits on a synthesized disk. Find the physical disk with
+   `diskutil info /Volumes/T9 | grep "APFS Physical Store"` (for example `disk4s2`), then run
+   `diskutil eject disk4`. The disk number can change each time the drive is plugged in; the
+   script looks it up when it runs.
 
 Stop the containers with Compose (step 2) before quitting Docker Desktop (step 3). Each service
 then gets its own grace period, and `docker compose --profile "*" ps -a` shows every exit code

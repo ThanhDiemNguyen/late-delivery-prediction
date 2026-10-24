@@ -53,6 +53,8 @@ Start them with `cp .env.example .env` (then change the passwords) and
 ├── docker-compose.yaml  every service, grouped by Compose profile (core so far)
 ├── infra/
 │   └── postgres/init/   SQL run on the first start of Postgres (creates the databases)
+├── scripts/
+│   └── safe-shutdown.sh stop everything, quit Docker Desktop and eject the SSD
 ├── docs/                one document per major part, linked from docs/README.md
 ├── pyproject.toml       Python project settings and the ruff lint rules
 ├── .env.example     template for the local .env file (the real .env is never committed)
@@ -63,7 +65,7 @@ Start them with `cp .env.example .env` (then change the passwords) and
 
 - An Apple Silicon Mac. Every image runs as linux/arm64 ([image inventory](docs/environment.md#image-inventory)).
 - Docker Desktop with 16 GB memory, 8 CPUs, 2 GB swap and an 800 GB disk limit. Its disk image is
-  on an external SSD; stop the stack before unplugging it
+  on an external SSD; run `scripts/safe-shutdown.sh` before unplugging it
   ([procedure](docs/environment.md#start-stop-and-unplug-safely)).
 - [uv](https://docs.astral.sh/uv/) for Python tools. The linter runs with `uvx ruff check .`.
 
