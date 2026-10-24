@@ -381,6 +381,38 @@ The fact row counts can be checked by hand:
 
 The ER diagram of `public` then shows the six foreign keys.
 
+## DP2: validate silver and gold (`jobs/validate.py --suite dp2`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.py --suite dp2 --ds 2024-11-29 --fail-on-error
+```
+
+DP1's suite accepts the source's dirty values. DP2's suite checks the opposite: silver and gold are
+clean, consistent and fully joined. It reads day `ds` of each table:
+
+| Dataset | Expectations |
+|---|---|
+| `silver.stg_orders` | rows exist; unique `order_id`; no NULL instants, vehicle, area, distance or store point; traffic, weather, vehicle and area only in the clean value sets (NULL traffic and weather are the seed's null block); store point inside the LA box; `pickup_ts > order_ts`; `delivered_ts > pickup_ts`; distance 0 to 40 km |
+| `silver.stg_courier_pings` | rows exist; `(courier_id, device_seq)` unique, so no duplicate is left; no NULL `speed_kmh` or `schema_version`; `schema_version` 1 or 2; speed 0 to 200 km/h |
+| `silver.stg_parcel_scans` | rows exist; unique `scan_id` |
+| `gold.dim_courier` | unique `courier_sk`; no NULL attributes; `valid_to_ts > valid_from_ts` (the full SCD2 invariants are in `jobs/check_dim_courier.py`) |
+| `gold.fact_delivery` | rows exist; unique `order_id`; no NULL key, label or measure; delivery 10 to 1,000 min; promised 120 to 300 min |
+| `gold.fact_delivery` joined to its four dimensions | every key finds its dimension row (foreign-key coverage) |
+| `gold.fact_delivery` labels | the day's late share is between 8% and 30% |
+| `gold.fact_courier_activity_hourly` | rows exist; `(courier_id, hour_start)` unique; 1 to 144 pings, 0 to 60 idle minutes and 0 to 120 km per hour |
+
+The two joined or derived datasets are built in the job (`DERIVED` in `jobs/validate.py`) and then
+checked like tables. That is how a single-table expectation library checks foreign keys.
+
+### Checks on the dev slice (2026-10-23)
+
+| Day | Result | Exit code |
+|---|---|---|
+| 2024-09-07 (v1 and v2 pings) | 60 of 60 expectations passed (35 s) | 0 |
+| 2024-11-29 (Black Friday, 3× orders) | 60 of 60 passed (43 s) | 0 |
+
+The DP1 suite still passes 73 of 73 on 2024-09-07 after the change.
+
 ### DP2 pitfalls
 
 - **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
