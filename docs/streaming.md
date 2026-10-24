@@ -13,6 +13,7 @@ the truth recomputed from the export Parquet.
 |---|---|---|
 | `baseline` | windows close at the watermark; late scans go to a side output | E16 |
 | `lateness` | windows keep their scans 20 minutes past the watermark; each late scan fires the window again | E17 |
+| `dedup` | `lateness`, plus a keyed dedup on `scan_id` with a state TTL before the windows | E18 |
 
 ## Topics
 
@@ -143,6 +144,8 @@ reach Kafka at `kafka:19092`.
 ```python
 watermarks = WatermarkStrategy.for_bounded_out_of_orderness(OUT_OF_ORDERNESS)            # 1
 scans = env.from_source(source, watermarks, SOURCE).map(parse, output_type=scan_type())  # 2
+if args.mode == "dedup":                                                                 # 2b
+    scans = scans.key_by(lambda scan: scan[SCAN_ID], key_type=Types.LONG()).process(FirstSend(), output_type=scan_type())
 
 late = OutputTag("late-scans", scan_type())
 counts = (
@@ -163,6 +166,12 @@ counts.get_side_output(late).map(as_json, output_type=Types.STRING()).sink_to(ka
 2. **The source** reads `parcel-scans-replay` from its first offset up to `--stop-offset`, and
    then ends. `parse` turns each JSON record into a tuple. Python runs in thread mode, inside the
    TaskManager's JVM.
+   - **2b. Dedup** (`dedup` mode only). The stream is keyed by `scan_id`, so all sends of one scan
+     reach the same `FirstSend` state. `FirstSend` keeps one flag per `scan_id` in keyed state: the
+     first send sets it and passes on, and a retry finds it set and is dropped. The flag expires
+     15 minutes after it was written (`StateTtlConfig`), so on a live stream the state holds only
+     the last 15 minutes of scan ids instead of growing for ever. A retry trails its first send
+     by 10 s at most, so it always finds the flag.
 3. **`key_by` the hub:** each hub has its own windows.
 4. **Tumbling event-time windows of 5 minutes:** a scan goes to the window `[k × 5 min,
    (k + 1) × 5 min)` that holds its `scan_ts`. Windows start on the epoch's 5-minute marks, which
@@ -288,8 +297,43 @@ The Flink total is 83,460 − 5,546 dropped + 1,252 retries = 79,166.
 - **Retries are still counted twice.** The 1,252 retries over-count 1,195 windows (some windows
   get two). That is now the only difference from the truth: 84,712 − 1,252 = 83,460 scans.
 
-Flink UI screenshots of a finished run (the job graph and the job list at
-`http://127.0.0.1:8084`) go with this document.
+## Dedup results (2026-10-24)
+
+`--mode dedup` passed its three checks: 100.00% of the windows exact, 0 scans dropped, and 83,460
+scans in the windows, which equals the distinct scans read.
+
+| | Baseline (run 1) | Lateness | Dedup |
+|---|---:|---:|---:|
+| windows exact (of 32,124) | 26,650 = 82.96% | 30,929 = 96.28% | **32,124 = 100.00%** |
+| over-counted | 911 | 1,195 | 0 |
+| under-counted (missing) | 4,577 (1,182) | 0 (0) | 0 (0) |
+| dropped (Flink, simulated) | 5,546, 6,334 | 0, 0 | 0, 0 |
+| firings | 30,942 | 36,525 | 36,369 |
+| scans | 79,166 | 84,712 | 83,460 |
+| delivered | 26,281 | 28,002 | 27,577 |
+| late-delivered | 4,525 | 4,825 | 4,738 |
+| job runtime | 85.1 s | 88.0 s | 88.0 s |
+
+The truth is 83,460 scans, 27,577 delivered and 4,738 late-delivered, so the dedup run equals it
+in every window.
+
+The record counts per task in Flink's REST API (`/jobs/<id>`) show where the retries go:
+
+| Task | Records in | Records out |
+|---|---:|---:|
+| `Source: parcel-scans-replay -> Map` | | 84,712 |
+| `KEYED PROCESS` (`FirstSend`) | 84,712 | 83,460 |
+| `TumblingEventTimeWindows -> sinks` | 83,460 | |
+
+`FirstSend` removed exactly the 1,252 retries.
+
+**State TTL is processing time.** Flink counts a flag's 15 minutes in wall-clock time. In a paced
+replay, the whole week takes 85 s, so no flag expires during a run. On a live stream, wall-clock
+time and event time move together. The TTL then bounds the state to about 15 minutes of scans,
+against a retry gap of 10 s at most.
+
+Flink UI screenshots go with this document: the job list with the three modes and the job graph
+of the dedup run, at `http://127.0.0.1:8084`.
 
 ## Pitfalls
 

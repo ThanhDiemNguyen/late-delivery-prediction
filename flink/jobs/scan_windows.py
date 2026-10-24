@@ -11,6 +11,8 @@ scan whose window has already closed when it arrives goes to scans-late.
     baseline   the window closes at the watermark: no allowed lateness, no dedup
     lateness   the window keeps its scans for 20 minutes after the watermark passes its end; each
                late scan in that time fires it again with the updated counts
+    dedup      lateness, plus a keyed dedup before the window: the first send of each scan_id
+               passes, a retry does not; the seen flag expires 15 minutes after it was written
 """
 
 import argparse
@@ -24,14 +26,16 @@ from pyflink.datastream.connectors.base import DeliveryGuarantee
 from pyflink.datastream.connectors.kafka import (
     KafkaOffsetsInitializer, KafkaRecordSerializationSchema, KafkaSink, KafkaSource, KafkaTopicPartition,
 )
-from pyflink.datastream.functions import ProcessWindowFunction
+from pyflink.datastream.functions import KeyedProcessFunction, ProcessWindowFunction, RuntimeContext
+from pyflink.datastream.state import StateTtlConfig, ValueStateDescriptor
 from pyflink.datastream.window import TumblingEventTimeWindows
 
 BOOTSTRAP = "kafka:19092"
 SOURCE, OUTPUT, LATE = "parcel-scans-replay", "hub-delivery-5m", "scans-late"
 WINDOW = Time.minutes(5)
 OUT_OF_ORDERNESS = Duration.of_seconds(10)
-ALLOWED_LATENESS_MS = {"baseline": 0, "lateness": 20 * 60_000}  # scans arrive at most 20 minutes late
+ALLOWED_LATENESS_MS = {"baseline": 0, "lateness": 20 * 60_000, "dedup": 20 * 60_000}  # scans arrive at most 20 min late
+SEEN_TTL = Time.minutes(15)  # a retry follows its first send by 1 to 10 s
 
 # One scan as a tuple: the fields the windows need, in this order.
 FIELDS = ["scan_id", "order_id", "hub_id", "scan_type", "scan_ts", "promised_ts", "sent_ts"]
@@ -56,6 +60,28 @@ def parse(value: str) -> tuple:
 def as_json(scan: tuple) -> str:
     """Return a scan tuple as JSON, for the side output."""
     return json.dumps(dict(zip(FIELDS, scan)))
+
+
+class FirstSend(KeyedProcessFunction):
+    """Pass the first send of each scan_id and drop its retries; keyed by scan_id."""
+
+    def open(self, runtime_context: RuntimeContext):
+        """Create the seen flag, which expires SEEN_TTL after it was written."""
+        ttl = (
+            StateTtlConfig.new_builder(SEEN_TTL)
+            .set_update_type(StateTtlConfig.UpdateType.OnCreateAndWrite)
+            .set_state_visibility(StateTtlConfig.StateVisibility.NeverReturnExpired)
+            .build()
+        )
+        seen = ValueStateDescriptor("seen", Types.BOOLEAN())
+        seen.enable_time_to_live(ttl)
+        self.seen = runtime_context.get_state(seen)
+
+    def process_element(self, scan, ctx):
+        """Yield the scan unless this scan_id was seen within the TTL."""
+        if self.seen.value() is None:
+            self.seen.update(True)
+            yield scan
 
 
 class CountScans(ProcessWindowFunction):
@@ -121,6 +147,8 @@ def main() -> None:
     # No timestamp assigner: the source gives each record its Kafka timestamp, which is scan_ts.
     watermarks = WatermarkStrategy.for_bounded_out_of_orderness(OUT_OF_ORDERNESS)
     scans = env.from_source(source, watermarks, SOURCE).map(parse, output_type=scan_type())
+    if args.mode == "dedup":
+        scans = scans.key_by(lambda scan: scan[SCAN_ID], key_type=Types.LONG()).process(FirstSend(), output_type=scan_type())
 
     late = OutputTag("late-scans", scan_type())
     counts = (

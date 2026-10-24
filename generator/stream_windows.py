@@ -40,8 +40,8 @@ from generator.storage import s3_client
 SOURCE, OUTPUT, LATE = "parcel-scans-replay", "hub-delivery-5m", "scans-late"
 FLINK_REST = "http://127.0.0.1:8084"
 WINDOW_MS, OUT_OF_ORDERNESS_MS = 300_000, 10_000
-ALLOWED_LATENESS_MS = {"baseline": 0, "lateness": 20 * 60_000}
-DEDUP = {"baseline": False, "lateness": False}
+ALLOWED_LATENESS_MS = {"baseline": 0, "lateness": 20 * 60_000, "dedup": 20 * 60_000}
+DEDUP = {"baseline": False, "lateness": False, "dedup": True}
 COUNTS = ["scans", "delivered", "late_delivered"]
 
 
@@ -170,6 +170,8 @@ def main() -> None:
     ]
     if lateness:
         checks.append(Check("scans dropped", dropped, 0, 0))
+    if dedup:
+        checks.append(Check("windows exact %", round(100 * result["exact"] / result["truth windows"], 2), 100, 0))
     facts = {
         "job": f"{job_id}, {job['duration'] / 1000:.1f} s; events sent in {sent_s:.1f} s at {args.rate:g}/s",
         "windows (truth, output)": f"{result['truth windows']:,}, {result['output windows']:,}; "
