@@ -184,3 +184,52 @@ This runs in the `gold_facts` task of the `dp2_transform_validate` DAG
   of pings that are on a trip, times the 17.6% of deliveries that are late (12.4%).
 
 The DP2 suite then passed 62 of 62 expectations for 2024-11-27, the new one included.
+
+## Schema evolution: app v2 pings next to v1 (`jobs/schema_evolution_demo.py`)
+
+**The problem.** From 2024-09-01 the courier app v2 rolls out over 14 days. v2 replaces
+`speed_kmh` (int) with `speed_mps` (float) and adds `battery_pct` and `gps_accuracy_m`, in new
+files in the same `export_date` folders as v1. A reader that assumes one schema either loses
+columns or fails ([data_characteristics.md](data_characteristics.md#schema-before-and-after-the-app-v2-change)).
+
+**The demo** reads three full-scale export dates: 2024-08-31 (v1 only), 2024-09-07 (both) and
+2024-09-15 (v2 only). It runs three steps:
+
+1. A read without `mergeSchema`, which takes one file's schema.
+2. A Delta table created from v1, then an append of v2 rows without `mergeSchema`.
+3. A read with `mergeSchema`, the Delta append with `mergeSchema`, and one speed column.
+
+**Results (2026-10-24, 80,959,776 pings, 55 s):**
+
+```text
+[1 naive read] 10 columns; lost against the merged read: ['battery_pct', 'gps_accuracy_m', 'speed_mps']
+[1 naive read] rows per app version: {'4.0.0': 40716612, '3.14.2': 40243164}
+[1 naive read] pings without speed_kmh: 40,716,612 of 80,959,776
+[2 append without mergeSchema] refused: [_LEGACY_ERROR_TEMP_DELTA_0007] A schema mismatch detected when writing to the Delta table
+[3 merged read] 13 columns; rows per app version: {'4.0.0': 40716612, '3.14.2': 40243164}
+[3 append with mergeSchema] table columns: [..., 'speed_kmh', 'app_version', 'uploaded_ts', 'speed_mps', 'battery_pct', 'gps_accuracy_m']
+[3 history] version 0: WRITE {'mode': 'Overwrite', 'partitionBy': '[]'}
+[3 history] version 1: WRITE {'mode': 'Append', 'partitionBy': '[]'}
+[3 unified speed] pings without a speed: 0 of 80,959,776; v2 columns present: ['battery_pct', 'gps_accuracy_m', 'speed_mps']
+```
+
+1. **The naive read fails silently.** Spark takes the schema from one file. Here that was a v1
+   file, so the read had 10 columns. Every v2 ping, 50.3% of the rows, then had no speed, and no
+   error was raised. It could as well have taken a v2 file and lost `speed_kmh` for the v1 rows.
+2. **Delta refuses the change.** A v1 table rejects an append of v2 rows unless the writer allows
+   the new columns. A pipeline that does not plan for the new version stops there.
+3. **The merged read and `mergeSchema` work.** The merged read has all 13 columns: a v1 row has
+   NULL in the v2 columns and the other way round. The append with `mergeSchema` adds the three new
+   columns to the table, recorded as version 1 in its history. `coalesce(speed_kmh, speed_mps × 3.6)`
+   leaves no ping without a speed.
+
+**In the pipelines.** Step 3 is what DP1 and DP2 do:
+
+- DP1 reads every export date with `mergeSchema` and appends to `bronze.raw_courier_pings` with
+  `mergeSchema` ([pipelines.md](pipelines.md#dp1-ingest-into-bronze-jobsdp1_ingestpy)).
+- DP2 unifies the two speeds in `silver.stg_courier_pings` and keeps `schema_version`.
+- The DP2 suite checks it on every run: no NULL `speed_kmh` or `schema_version`, and
+  `schema_version` in {1, 2}.
+
+On the slice, 2024-09-07 (a rollout day) passed with both versions present
+([pipelines.md](pipelines.md#checks-on-the-dev-slice-2024-09-07-a-v2-rollout-day)).
