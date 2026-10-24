@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS dim_customer (
     signup_ts   timestamptz NOT NULL
 );
 
+-- H3 drop zones (resolution 7), from Apache Sedona.
+CREATE TABLE IF NOT EXISTS dim_zone (
+    zone_id      bigint PRIMARY KEY,
+    h3_index     text NOT NULL UNIQUE,
+    resolution   smallint NOT NULL,
+    center_lat   double precision NOT NULL,
+    center_lon   double precision NOT NULL,
+    area_km2     double precision NOT NULL,
+    boundary_wkt text NOT NULL,
+    main_hub_id  smallint NOT NULL REFERENCES dim_hub,
+    customers    integer NOT NULL
+);
+
 -- SCD type 2: one row per version; valid_to_ts is exclusive and 9999-12-31 while open.
 CREATE TABLE IF NOT EXISTS dim_courier (
     courier_sk      bigint PRIMARY KEY,
@@ -103,3 +116,12 @@ CREATE TABLE IF NOT EXISTS obt_delivery (
     delivered_ts         timestamptz NOT NULL,
     promised_ts          timestamptz NOT NULL
 );
+
+-- Added with the H3 zones: the drop zone of each delivery. Idempotent, for warehouses created before.
+ALTER TABLE fact_delivery ADD COLUMN IF NOT EXISTS drop_zone_id bigint;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fact_delivery_drop_zone_id_fkey') THEN
+        ALTER TABLE fact_delivery ADD CONSTRAINT fact_delivery_drop_zone_id_fkey FOREIGN KEY (drop_zone_id) REFERENCES dim_zone;
+    END IF;
+END $$;

@@ -5,7 +5,8 @@
 
 fact_delivery joins each order to the dim_courier version that was valid when the parcel was
 picked up (valid_from_ts <= pickup_ts < valid_to_ts), so a later rating or vehicle change does not
-rewrite history. It carries the label: is_late = delivered_ts > promised_ts.
+rewrite history. It carries the label: is_late = delivered_ts > promised_ts, and drop_zone_id, the H3 cell
+(resolution 7, Apache Sedona) of the drop point, which joins to dim_zone.
 
 fact_courier_activity_hourly sums the silver pings per courier and local hour: ping count, km moved
 (between consecutive pings), idle minutes (pings with no trip) and mean speed while on a trip. The
@@ -16,7 +17,7 @@ import argparse
 
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
-from common import lakehouse_session
+from common import lakehouse_session, with_sedona
 
 GOLD = "s3a://lakehouse/gold"
 LA = "America/Los_Angeles"
@@ -58,6 +59,7 @@ def build_fact_delivery(spark: SparkSession) -> None:
         (F.col("o.delivered_ts") > F.col("o.promised_ts")).alias("is_late"),
         "o.traffic", "o.weather", "o.vehicle", "o.area", "o.category",
         F.hour(local_order).alias("order_hour"),
+        F.expr("ST_H3CellIDs(ST_Point(o.drop_lon, o.drop_lat), 7, true)[0]").alias("drop_zone_id"),
         F.date_format(local_order, "yyyy-MM").alias("order_month"),
     )
     save(fact, "fact_delivery", "order_month", dynamic=False)
@@ -101,7 +103,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--rebuild", action="store_true", help="rebuild every ping date of the activity fact")
     args = parser.parse_args()
-    spark = lakehouse_session("dp2_gold_facts")
+    spark = with_sedona(lakehouse_session("dp2_gold_facts"))
     build_fact_delivery(spark)
     build_fact_activity(spark, args.rebuild)
     spark.stop()

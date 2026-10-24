@@ -231,6 +231,7 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/check_dim
 | `dim_hub` | one hub | `silver.stg_hubs` (type 1: current values) |
 | `dim_customer` | one customer | `silver.stg_customers` (type 1) |
 | `dim_date` | one local date of the period (184 days to 2024-12-01) | generated: weekday, ISO week, the two peak weeks, US holidays |
+| `dim_zone` | one H3 cell (resolution 7) with a customer's home | `silver.stg_customers`, cells from Apache Sedona ([novel_h3_sedona.md](novel_h3_sedona.md)) |
 
 ### `dim_courier`, SCD type 2
 
@@ -292,7 +293,7 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_gold_
 
 | Fact | Grain | Keys | Measures | Partitioned by |
 |---|---|---|---|---|
-| `fact_delivery` | one order | `order_id`; `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date` | `distance_km`, `delivery_min`, `promised_min`, `is_late`, plus traffic, weather, vehicle, area, category, `order_hour` | `order_month` |
+| `fact_delivery` | one order | `order_id`; `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date`, `drop_zone_id` → `dim_zone` | `distance_km`, `delivery_min`, `promised_min`, `is_late`, plus traffic, weather, vehicle, area, category, `order_hour` | `order_month` |
 | `fact_courier_activity_hourly` | one courier in one local hour | `courier_id`, `hub_id` → `dim_hub`, `date_key` → `dim_date`, `hour_start` | `ping_count`, `km_moved`, `idle_min`, `avg_speed_kmh`, `trips` | `activity_date` |
 
 **Courier version at pickup.** `fact_delivery` joins each order to the `dim_courier` version
@@ -341,9 +342,10 @@ users, with declared keys (`jobs/sql/dwh_schema.sql`).
 |---|---|---|---|
 | `dim_date` | every day of the period | `date_key` | |
 | `dim_hub` | every hub | `hub_id` | |
+| `dim_zone` | every H3 drop zone | `zone_id` | `main_hub_id` → `dim_hub` |
 | `dim_customer` | every customer | `customer_id` | `hub_id` → `dim_hub` |
 | `dim_courier` | every SCD2 version | `courier_sk` | `hub_id` → `dim_hub` |
-| `fact_delivery` | the last 90 days of the period | `order_id` | `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date` |
+| `fact_delivery` | the last 90 days of the period | `order_id` | `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date`, `drop_zone_id` → `dim_zone` |
 | `obt_delivery` | the last 30 days, one wide row per order | `order_id` | none: a one-big-table carries its dimensions' attributes on the row |
 
 **How it loads.** Postgres refuses to `TRUNCATE` one table that another references, and a reader
@@ -422,6 +424,7 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp3_featu
 | Feature table | Entity and grain | Features | Built from |
 |---|---|---|---|
 | `gold.feat_courier_daily` | courier, local day (`feature_date`) | `on_time_rate_30d`: share of the courier's deliveries in the last 30 days that were on time; `deliveries_7d`; `avg_speed_kmh_7d`: speed on trips over the last 7 days, weighted by pings | `fact_delivery`, `fact_courier_activity_hourly` |
+| `gold.feat_zone_daily` | H3 drop zone, local day | `deliveries_30d`, `late_rate_30d` ([novel_h3_sedona.md](novel_h3_sedona.md)) | `fact_delivery` (`drop_zone_id`), `dim_zone` |
 | `gold.feat_hub_hourly` | hub, hour (`hour_start`) | `orders_1h`: orders placed in the hour; `late_rate_7d`: late share of the hub's deliveries in the last 168 hours; `active_couriers_1h` | `fact_delivery`, `fact_courier_activity_hourly` |
 
 Every row has two time columns:

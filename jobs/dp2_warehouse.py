@@ -21,7 +21,7 @@ from common import lakehouse_session
 DWH_URL = os.environ.get("DWH_JDBC_URL", "jdbc:postgresql://postgres:5432/dwh")
 SCHEMA_SQL = Path(__file__).resolve().parent / "sql" / "dwh_schema.sql"
 FACT_DAYS, OBT_DAYS = 90, 30
-LOAD_ORDER = ["dim_date", "dim_hub", "dim_customer", "dim_courier", "fact_delivery", "obt_delivery"]
+LOAD_ORDER = ["dim_date", "dim_hub", "dim_zone", "dim_customer", "dim_courier", "fact_delivery", "obt_delivery"]
 
 
 def _credentials() -> dict:
@@ -56,7 +56,7 @@ def tables(spark: SparkSession) -> dict[str, DataFrame]:
     order_date = F.to_date(F.from_utc_timestamp("order_ts", "America/Los_Angeles"))
     fact_columns = ["order_id", "courier_sk", "hub_id", "customer_id", "date_key", "order_ts", "pickup_ts", "delivered_ts",
                     "promised_ts", "distance_km", "delivery_min", "promised_min", "is_late", "traffic", "weather",
-                    "vehicle", "area", "category", "order_hour"]
+                    "vehicle", "area", "category", "order_hour", "drop_zone_id"]
     recent = fact.where(order_date > F.date_sub(F.lit(last), FACT_DAYS)).select(*fact_columns)
     hub = spark.table("gold.dim_hub")
     courier = spark.table("gold.dim_courier")
@@ -79,6 +79,7 @@ def tables(spark: SparkSession) -> dict[str, DataFrame]:
     return {
         "dim_date": date,
         "dim_hub": hub,
+        "dim_zone": spark.table("gold.dim_zone"),
         "dim_customer": customer,
         "dim_courier": courier.select("courier_sk", "courier_id", "hub_id", "vehicle_type", "rating", "employment_type",
                                       "valid_from_ts", "valid_to_ts", "is_current"),

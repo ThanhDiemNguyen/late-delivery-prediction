@@ -6,6 +6,8 @@
                               on_time_rate_30d, deliveries_7d, avg_speed_kmh_7d
     gold.feat_hub_hourly      one row per hub and local hour:
                               orders_1h, late_rate_7d, active_couriers_1h
+    gold.feat_zone_daily      one row per H3 drop zone (dim_zone) and local day:
+                              deliveries_30d, late_rate_30d
 
 Every row has event_timestamp, the end of the period it describes (the next local midnight, or
 the next hour), and created, when this job computed it. A value only uses data known by its
@@ -101,10 +103,30 @@ def build_hub_hourly(spark: SparkSession) -> DataFrame:
     )
 
 
+def build_zone_daily(spark: SparkSession) -> DataFrame:
+    """Return feat_zone_daily: the 30-day late rate of the deliveries dropped in each H3 zone."""
+    days = spark.table("gold.dim_date").select(F.col("date").alias("day"))
+    grid = spark.table("gold.dim_zone").select("zone_id").crossJoin(days)
+    delivered = spark.table("gold.fact_delivery").groupBy(F.col("drop_zone_id").alias("zone_id"), local_day("delivered_ts").alias("day")).agg(
+        F.count("*").alias("delivered"), F.sum(F.col("is_late").cast("int")).alias("late")
+    )
+    daily = grid.join(delivered, ["zone_id", "day"], "left").fillna(0)
+    month = Window.partitionBy("zone_id").orderBy(F.datediff(F.col("day"), F.lit("2024-01-01"))).rangeBetween(-29, 0)
+    return daily.select(
+        "zone_id",
+        F.col("day").alias("feature_date"),
+        F.sum("delivered").over(month).alias("deliveries_30d"),
+        F.round(F.sum("late").over(month) / F.nullif(F.sum("delivered").over(month), F.lit(0)), 4).alias("late_rate_30d"),
+        end_of_day("day").alias("event_timestamp"),
+        F.current_timestamp().alias("created"),
+    )
+
+
 def main() -> None:
-    """Build both feature tables."""
+    """Build the feature tables."""
     spark = lakehouse_session("dp3_features")
-    for table, build in (("feat_courier_daily", build_courier_daily), ("feat_hub_hourly", build_hub_hourly)):
+    builds = (("feat_courier_daily", build_courier_daily), ("feat_hub_hourly", build_hub_hourly), ("feat_zone_daily", build_zone_daily))
+    for table, build in builds:
         save(build(spark), table)
         print(f"gold.{table}: {spark.table(f'gold.{table}').count():,} rows")
     spark.stop()

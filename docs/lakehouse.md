@@ -42,9 +42,10 @@ The image is built on `apache/spark:3.5.9-scala2.12-java17-python3-ubuntu` (Ubun
 | `postgresql` JDBC | 42.7.7 | read `oms`, write `dwh` |
 | `delta-spark` (Python, `--no-deps`) | 3.3.3 | the `delta.tables` API; `--no-deps` stops pip from installing a second PySpark |
 | `great_expectations` | 0.18.19 | the validate stage of DP1 to DP3 ([pipelines.md](pipelines.md)) |
+| `sedona-spark-shaded-3.5_2.12` + `geotools-wrapper`, `apache-sedona`, `h3` | 1.9.0, 1.9.0-33.5, 1.9.0, 4.5.0 | H3 zones and spatial SQL ([novel_h3_sedona.md](novel_h3_sedona.md)); `h3` checks Sedona's cells |
 
 This first image is deliberately naive: one stage, jars downloaded at build time, and a `chmod`
-in its own layer. It is 2.57 GB (2.05 GB before Great Expectations was added), against 1.13 GB for the base
+in its own layer. It is 2.82 GB (2.05 GB before Great Expectations and Sedona were added), against 1.13 GB for the base
 image. The Docker optimization step
 rewrites it as a multi-stage build and measures both with the same size measure
 ([environment.md](environment.md#image-inventory)).

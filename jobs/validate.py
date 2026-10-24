@@ -66,6 +66,7 @@ def fact_with_dimensions(spark: SparkSession, ds: str) -> DataFrame:
     dims = {
         "dim_courier": ("courier_sk", "courier_sk"), "dim_hub": ("hub_id", "hub_id"),
         "dim_customer": ("customer_id", "customer_id"), "dim_date": ("date_key", "date_key"),
+        "dim_zone": ("zone_id", "drop_zone_id"),
     }
     for dim, (key, column) in dims.items():
         found = spark.table(f"gold.{dim}").select(F.col(key).alias(f"{dim}_{column}")).distinct()
@@ -182,7 +183,7 @@ SUITES = {
             ("expect_column_values_to_be_between", {"column": "promised_min", "min_value": 120, "max_value": 300}),
         ]),
         ("gold.fact_delivery joined to its dimensions", None, [
-            *not_null("dim_courier_courier_sk", "dim_hub_hub_id", "dim_customer_customer_id", "dim_date_date_key"),
+            *not_null("dim_courier_courier_sk", "dim_hub_hub_id", "dim_customer_customer_id", "dim_date_date_key", "dim_zone_drop_zone_id"),
         ]),
         ("gold.fact_delivery labels", None, [
             ("expect_column_mean_to_be_between", {"column": "late", "min_value": 0.08, "max_value": 0.30}),
@@ -214,6 +215,13 @@ SUITES = {
             ("expect_column_values_to_be_between", {"column": "late_rate_7d", "min_value": 0, "max_value": 1}),
             ("expect_column_values_to_be_between", {"column": "orders_1h", "min_value": 0}),
             ("expect_column_pair_values_A_to_be_greater_than_B", {"column_A": "event_timestamp", "column_B": "hour_start"}),
+            ("expect_column_pair_values_A_to_be_greater_than_B", {"column_A": "created", "column_B": "event_timestamp", "or_equal": True}),
+        ]),
+        ("gold.feat_zone_daily", on_day("feature_date"), [
+            ("expect_table_row_count_to_be_between", {"min_value": 1}),
+            ("expect_compound_columns_to_be_unique", {"column_list": ["zone_id", "feature_date"]}),
+            *not_null("zone_id", "deliveries_30d", "event_timestamp", "created"),
+            ("expect_column_values_to_be_between", {"column": "late_rate_30d", "min_value": 0, "max_value": 1}),
             ("expect_column_pair_values_A_to_be_greater_than_B", {"column_A": "created", "column_B": "event_timestamp", "or_equal": True}),
         ]),
     ],

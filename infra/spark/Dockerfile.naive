@@ -4,6 +4,7 @@
 #   hadoop-aws 3.3.4 + AWS SDK 1.12.262 S3A access to SeaweedFS (matches Spark's Hadoop 3.3.4)
 #   postgresql 42.7.7                   JDBC reads of oms and writes to dwh
 #   great_expectations 0.18.19          the validate stage of DP1 to DP3 (the course's version)
+#   sedona 1.9.0 + geotools-wrapper     H3 cells and spatial SQL (novel idea 1); h3 4.5.0 to check them
 FROM apache/spark:3.5.9-scala2.12-java17-python3-ubuntu
 
 USER root
@@ -12,9 +13,11 @@ ADD https://repo1.maven.org/maven2/io/delta/delta-storage/3.3.3/delta-storage-3.
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar /opt/spark/jars/
 ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar /opt/spark/jars/
 ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.7/postgresql-42.7.7.jar /opt/spark/jars/
+ADD https://repo1.maven.org/maven2/org/apache/sedona/sedona-spark-shaded-3.5_2.12/1.9.0/sedona-spark-shaded-3.5_2.12-1.9.0.jar /opt/spark/jars/
+ADD https://repo1.maven.org/maven2/org/datasyslab/geotools-wrapper/1.9.0-33.5/geotools-wrapper-1.9.0-33.5.jar /opt/spark/jars/
 # The delta Python API only; --no-deps keeps pip from installing a second PySpark.
 RUN chmod 644 /opt/spark/jars/*.jar \
     && pip3 install --no-cache-dir --no-deps delta-spark==3.3.3 importlib_metadata==8.5.0 zipp==3.21.0 \
-    && pip3 install --no-cache-dir great_expectations==0.18.19 \
+    && pip3 install --no-cache-dir great_expectations==0.18.19 apache-sedona==1.9.0 h3==4.5.0 \
     && mkdir -p /opt/spark/events && chown spark:spark /opt/spark/events
 USER spark

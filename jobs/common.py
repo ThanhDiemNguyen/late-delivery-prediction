@@ -21,3 +21,10 @@ def lakehouse_session(app_name: str) -> SparkSession:
             "docker compose --profile core --profile batch up -d --force-recreate spark-master spark-worker spark-history"
         )
     return spark
+
+
+def with_sedona(spark: SparkSession) -> SparkSession:
+    """Register Apache Sedona's spatial and H3 SQL functions (ST_*) on the session and return it."""
+    from sedona.spark import SedonaContext
+
+    return SedonaContext.create(spark)

@@ -1,4 +1,4 @@
-"""DP2, gold dimensions: dim_courier (SCD type 2), dim_hub, dim_customer and dim_date.
+"""DP2, gold dimensions: dim_courier (SCD type 2), dim_hub, dim_customer, dim_date and dim_zone.
 
     spark-submit /opt/jobs/dp2_gold_dims.py                       # add what silver has that gold does not
     spark-submit /opt/jobs/dp2_gold_dims.py --until 2024-08-31    # courier changes up to a local date only
@@ -10,6 +10,9 @@ open) and is_current. A version starts only when a tracked attribute really chan
 attributes is compared with the previous row, so rating reviews that change nothing add no
 version. New changes are applied with one Delta MERGE that closes each courier's open version and
 inserts the new ones. courier_sk is the change_id that opened the version, so it is stable.
+
+dim_zone has one row per H3 cell (resolution 7, about 5 km2) that holds a customer's home, the
+drop point of their parcels. Apache Sedona computes the cells (ST_H3CellIDs) and their hexagons.
 """
 
 import argparse
@@ -18,9 +21,10 @@ from datetime import date, timedelta
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
-from common import lakehouse_session
+from common import lakehouse_session, with_sedona
 
 GOLD = "s3a://lakehouse/gold"
+H3_RESOLUTION = 7
 LA = "America/Los_Angeles"
 TRACKED = ["home_hub_id", "vehicle_type", "rating", "employment_type"]
 OPEN_END = "9999-12-31 00:00:00"
@@ -113,8 +117,32 @@ def build_small_dims(spark: SparkSession) -> None:
     schema = ("date_key int, date date, day_of_week int, is_weekend boolean, iso_week int, month int, "
               "is_peak_week boolean, peak_name string, is_holiday boolean, holiday_name string")
     save(spark.createDataFrame(rows, schema), "dim_date")
-    for t in ("dim_hub", "dim_customer", "dim_date"):
+    save(build_dim_zone(spark), "dim_zone")
+    for t in ("dim_hub", "dim_customer", "dim_date", "dim_zone"):
         print(f"gold.{t}: {spark.table(f'gold.{t}').count():,} rows")
+
+
+def build_dim_zone(spark: SparkSession) -> DataFrame:
+    """Return dim_zone: the H3 cells of the customers' homes, with their hexagon and main hub."""
+    homes = spark.table("silver.stg_customers").withColumn(
+        "zone_id", F.expr(f"ST_H3CellIDs(ST_Point(home_lon, home_lat), {H3_RESOLUTION}, true)[0]")
+    )
+    per_hub = homes.groupBy("zone_id", "service_hub_id").agg(F.count("*").alias("n"))
+    main_hub = per_hub.withColumn(
+        "_rank", F.row_number().over(Window.partitionBy("zone_id").orderBy(F.col("n").desc(), "service_hub_id"))
+    ).where("_rank = 1").select("zone_id", F.col("service_hub_id").alias("main_hub_id"))
+    zones = homes.groupBy("zone_id").agg(F.count("*").alias("customers")).join(main_hub, "zone_id")
+    return zones.select(
+        "zone_id",
+        F.lower(F.hex("zone_id")).alias("h3_index"),
+        F.lit(H3_RESOLUTION).alias("resolution"),
+        F.expr("ST_Y(ST_Centroid(ST_H3ToGeom(array(zone_id))[0]))").alias("center_lat"),
+        F.expr("ST_X(ST_Centroid(ST_H3ToGeom(array(zone_id))[0]))").alias("center_lon"),
+        F.round(F.expr("ST_AreaSpheroid(ST_H3ToGeom(array(zone_id))[0])") / 1e6, 3).alias("area_km2"),
+        F.expr("ST_AsText(ST_H3ToGeom(array(zone_id))[0])").alias("boundary_wkt"),
+        "main_hub_id",
+        "customers",
+    )
 
 
 def main() -> None:
@@ -124,7 +152,7 @@ def main() -> None:
     parser.add_argument("--rebuild", action="store_true", help="rebuild dim_courier from all of silver")
     parser.add_argument("--part", choices=["courier", "small"], help="one part only")
     args = parser.parse_args()
-    spark = lakehouse_session("dp2_gold_dims")
+    spark = with_sedona(lakehouse_session("dp2_gold_dims"))
     spark.sql(f"CREATE DATABASE IF NOT EXISTS gold LOCATION '{GOLD}'")
     if args.part in (None, "small"):
         build_small_dims(spark)
