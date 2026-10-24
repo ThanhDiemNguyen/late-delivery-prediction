@@ -18,7 +18,8 @@ from common import lakehouse_session, with_sedona
 
 SAMPLE = 20_000
 RESOLUTION = 7
-# The generator's hand-drawn LA service polygon (generator/la_hubs.py SERVICE_POLYGON), lon lat.
+# The generator's hand-drawn LA service polygon (generator/la_hubs.py SERVICE_POLYGON), as (lat, lon)
+# pairs; POLYGON_WKT writes them as lon lat.
 SERVICE_POLYGON = [
     (34.82, -118.95), (34.82, -117.65), (33.78, -117.65), (33.75, -118.10), (33.762, -118.19),
     (33.71, -118.29), (33.74, -118.41), (33.80, -118.40), (33.842, -118.394), (33.885, -118.41),

@@ -123,6 +123,7 @@ def send(events: pd.DataFrame, topic: str, bootstrap: str, rate: float) -> float
     failed = []
 
     def delivered(err, _msg) -> None:
+        """Keep the error of an event that Kafka did not deliver."""
         if err is not None:
             failed.append(err)
 
