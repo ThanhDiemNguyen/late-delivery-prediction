@@ -61,6 +61,31 @@ for img in postgres:16.15 chrislusf/seaweedfs:4.48 apache/kafka:3.9.2 \
 done
 ```
 
+## Built images: naive against multi-stage
+
+Each built image has two Dockerfiles in its `infra/` folder:
+
+- `Dockerfile.naive` is the first, simple build, kept as the baseline;
+- `Dockerfile` is the multi-stage rewrite that the services run.
+
+Sizes are from `docker images`, and the layers behind them from `docker history`.
+
+| Image | `Dockerfile.naive` | `Dockerfile` | Saved | Where the saving comes from |
+|---|---:|---:|---:|---|
+| `lastleg/spark:3.5.9` | 2.82 GB | 1.96 GB | 0.86 GB (30%) | The naive build adds the 7 jars with `ADD` and then runs `chmod` on them: that layer (1.28 GB) stores the 405 MB of jars a second time, with the pip packages. The fetch stage downloads them and sets their mode once, and the runtime copies them in one layer. The pip packages are installed with `--target`, without bytecode caches or their test suites. |
+
+**Checks of `lastleg/spark:3.5.9` (2026-10-24),** with the master, the worker and the history
+server recreated on it:
+
+- **Imports:** Great Expectations 0.18.19 (`SparkDFDataset`), Sedona 1.9.0, h3 4.5.0 and
+  delta-spark 3.3.3 import, and the 7 jars are in `/opt/spark/jars` with mode 644.
+- **`smoke_lakehouse.py`:** it read 23,603,484 pings of 2024-06-01 over S3A, counted 80,800,000
+  `oms` orders over JDBC, and wrote and registered a Delta table.
+- **`validate.py --suite dp1 --ds 2024-11-27`:** 73 of 73 expectations passed. One earlier
+  attempt failed before it registered with the master. It started just as a killed application was
+  being removed; the cause was not captured, and the rerun passed.
+- **`check_h3.py`** (Sedona against h3) passed.
+
 ## Idle memory
 
 Each image that can start without the rest of the platform ran with its default configuration on

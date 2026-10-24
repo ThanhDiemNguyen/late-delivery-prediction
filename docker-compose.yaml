@@ -203,8 +203,8 @@ services:
   spark-master:
     build:
       context: ./infra/spark
-      dockerfile: Dockerfile.naive
-    image: lastleg/spark:3.5.9-naive
+      dockerfile: Dockerfile   # Dockerfile.naive builds lastleg/spark:3.5.9-naive, the size baseline
+    image: lastleg/spark:3.5.9
     profiles: [batch]
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     depends_on:
@@ -231,7 +231,7 @@ services:
       retries: 12
 
   spark-worker:
-    image: lastleg/spark:3.5.9-naive
+    image: lastleg/spark:3.5.9
     profiles: [batch]
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
@@ -252,7 +252,7 @@ services:
       retries: 12
 
   spark-history:
-    image: lastleg/spark:3.5.9-naive
+    image: lastleg/spark:3.5.9
     profiles: [batch]
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
     depends_on:
