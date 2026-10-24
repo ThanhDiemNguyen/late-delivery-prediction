@@ -125,15 +125,19 @@ docker compose --profile core --profile stream up -d --wait
 
 | Service | Image | Settings | Port on the Mac | Idle memory |
 |---|---|---|---|---:|
-| `flink-jobmanager` | `lastleg/flink:1.20.5-naive` | `jobmanager.memory.process.size: 1024m` | `127.0.0.1:8084` (Flink UI; 8081 is the Spark worker UI) | 338 MiB |
+| `flink-jobmanager` | `lastleg/flink:1.20.5` (multi-stage) | `jobmanager.memory.process.size: 1024m` | `127.0.0.1:8084` (Flink UI; 8081 is the Spark worker UI) | 338 MiB |
 | `flink-taskmanager` | same | `taskmanager.memory.process.size: 2048m`, 1 slot, parallelism 1 | | 427 MiB |
+
+The idle memory was measured on the first image, `lastleg/flink:1.20.5-naive`, which also ran the
+slice-week results below.
 
 The image adds these to `flink:1.20.5-scala_2.12-java17`. The first build
 (`infra/flink/Dockerfile.naive`) was 2.06 GB; the services now run the multi-stage
 `infra/flink/Dockerfile` at 1.68 GB ([environment.md](environment.md#built-images-naive-against-multi-stage)):
 
 - Python 3.10.12 and PyFlink 1.20.5, compiled from source because PyPI has no arm64 wheel
-  ([environment.md](environment.md#pyflink-on-arm64)). The compilers stay in this one-stage image.
+  ([environment.md](environment.md#pyflink-on-arm64)). The compilers are only in the first stage,
+  which builds the wheels; the image the services run keeps none.
 - `libpython3.10`, which thread mode needs.
 - `flink-sql-connector-kafka` 3.4.0-1.20.
 - A copy of `flink-python` in `lib/` (see Pitfalls).
@@ -158,7 +162,8 @@ counts = (
     .process(CountScans(args.mode), output_type=Types.STRING())                          # 6
 )
 counts.sink_to(kafka_sink(OUTPUT))                                                       # 7
-counts.get_side_output(late).map(as_json, output_type=Types.STRING()).sink_to(kafka_sink(LATE))
+late_scans = counts.get_side_output(late).map(as_json, output_type=Types.STRING()).name("late scans").disable_chaining()
+late_scans.sink_to(kafka_sink(LATE))                                                     # 8
 ```
 
 1. **The watermark trails the newest event time seen by 10 s.** A watermark W tells every operator
@@ -188,6 +193,10 @@ counts.get_side_output(late).map(as_json, output_type=Types.STRING()).sink_to(ka
    after `promised_ts`. Each firing is one JSON record, with the watermark at that moment.
 7. **Two at-least-once Kafka sinks:** the windows go to `hub-delivery-5m`, the late scans to
    `scans-late`.
+8. **The late scans are a task of their own** (`disable_chaining()`). Chained to the window, they
+   were invisible in the Flink UI, which counts records only between tasks. As their own task,
+   the UI shows how many scans missed their window. This changes no result, only what the UI can
+   count; the slice-week results below ran before the change.
 
 One window, and one late scan that missed a window:
 
@@ -257,15 +266,16 @@ Run 1 in totals:
 | Truth | 83,460 | 27,577 | 4,738 |
 | Flink | 79,166 | 26,281 | 4,525 |
 
-The Flink total is 83,460 − 5,546 dropped + 1,252 retries = 79,166.
+The Flink total is 84,712 records read − 5,546 dropped = 79,166 scans in the windows.
 
 **What the baseline shows:**
 
 - **Late arrivals are lost to the windows.** Every dropped scan arrived at least 123 s after it
   happened: in run 4, 1,948 `at_hub`, 1,894 `picked_up` and 1,746 `delivered` scans. Run 1 has
   1,182 windows missing entirely: windows whose scans all came late.
-- **Retries are counted twice.** That over-counts 911 windows. No retry was dropped: a retry
-  trails its first send by 10 s at most.
+- **Retries are counted twice.** The retries of on-time scans over-count 911 windows. A retry of
+  a scan that came late is dropped with it: it arrives 1 to 10 s after the first send, and by then
+  the watermark has not moved back.
 - **Flink drops 11% to 12% fewer than the simulation,** and the count varies by up to 1.7%
   between runs. The source emits the watermark on a 1 ms timer, not after every record. So a late scan
   close to its window's end can still find the window open, depending on when the timer fired.
@@ -334,17 +344,62 @@ replay, the whole week takes 85 s, so no flag expires during a run. On a live st
 time and event time move together. The TTL then bounds the state to about 15 minutes of scans,
 against a retry gap of 10 s at most.
 
-The Flink UI (`http://127.0.0.1:8084`): the finished jobs, then the job graph of one run per mode.
-The short baseline jobs are the smoke runs. In the dedup graph, `KEYED PROCESS` receives 84,712
-records and sends 83,460.
+## Flink UI proof (2026-10-24): one full-scale day
 
-![Flink completed jobs](images/streaming/flink-completed-jobs.png)
+The slice-week runs above ran before the late scans were their own task, so their Flink UI could
+not show the drops. After that change (step 8), the three modes ran again on the multi-stage
+image, `lastleg/flink:1.20.5`. By then `app-exports` and `oms` held the full-scale generation, so
+the runs replay one full-scale day: the scans of export date 2024-11-04.
 
-![Baseline job](images/streaming/flink-job-baseline.png)
+```bash
+uv run python -m generator.stream_windows --mode baseline --start 2024-11-04 --days 1 --rate 20000
+```
 
-![Lateness job](images/streaming/flink-job-lateness.png)
+**The pacing rule still holds.** The day has 1,166,051 records over 86,400 s of event time,
+about 13.5 per event-second. At 20,000 records per second, one 1 ms watermark interval covers
+about 1.5 s of event time, well under the 10 s bound. The baseline job kept up with the sending
+(61.6 s for 58.3 s). The dedup job read more slowly (183.3 s), so each interval covered even less
+event time. The records are 1,148,819 scans and 17,232 retries (1.50%).
 
-![Dedup job](images/streaming/flink-job-dedup.png)
+| | Baseline | Lateness | Dedup |
+|---|---:|---:|---:|
+| windows exact (of 9,281) | 1,112 = 11.98% | 3,811 = 41.06% | **9,281 = 100.00%** |
+| over-counted, under-counted | 908, 7,728 | 5,470, 0 | 0, 0 |
+| windows missing | 19 | 0 | 0 |
+| dropped (Flink, simulated) | 87,137, 87,261 | 0, 0 | 0, 0 |
+| scans in the windows (truth 1,148,819) | 1,078,914 | 1,166,051 | 1,148,819 |
+| firings | 9,262 | 96,414 | 95,134 |
+| job runtime | 61.6 s | 76.6 s | 183.3 s |
+
+A full-scale window holds about 124 scans, against about 3 on the slice. Most windows therefore
+hold at least one late scan or one retry, which is why fewer windows are exact than on the slice.
+The three fixes give the same verdict: allowed lateness removes every drop, and the keyed dedup
+then makes every window exact. The baseline's 87,137 drops are within 0.14% of the simulated
+87,261, because at this rate the watermark moves almost record by record.
+
+**What the Flink UI shows.** The job graph's table counts the records between tasks. The
+`Records Sent` of the window task is the number of scans it sent to the side output, and the
+`Records Received` of `late scans` is the same number.
+
+The completed jobs. The two cancelled baseline jobs are the first attempts, which replayed a
+whole full-scale week at 1,000 records per second, about 2 hours a run; they were stopped:
+
+![Flink completed jobs: baseline, lateness and dedup finished on one full-scale day; two cancelled full-week baseline attempts](images/streaming/flink-completed-jobs.png)
+
+**Baseline.** The window task receives all 1,166,051 records and sends 87,137 to `late scans`:
+every one of them arrived after the watermark had passed its window's end.
+
+![Baseline job graph: the window task sends 87,137 records to late scans](images/streaming/flink-job-baseline.png)
+
+**Allowed lateness.** The same graph, with 20 minutes of allowed lateness. The window task sends
+0 records to `late scans`: every late scan found its window still open.
+
+![Lateness job graph: the window task sends 0 records to late scans](images/streaming/flink-job-lateness.png)
+
+**Dedup.** The `KEYED PROCESS` task (`FirstSend`) receives 1,166,051 records and sends 1,148,819:
+it removed exactly the 17,232 retries. The window task then sends 0 records to `late scans`.
+
+![Dedup job graph: KEYED PROCESS turns 1,166,051 records into 1,148,819, and no scan reaches late scans](images/streaming/flink-job-dedup.png)
 
 ## Pitfalls
 
