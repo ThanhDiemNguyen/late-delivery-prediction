@@ -41,9 +41,11 @@ The image is built on `apache/spark:3.5.9-scala2.12-java17-python3-ubuntu` (Ubun
 | `hadoop-aws` + `aws-java-sdk-bundle` | 3.3.4 + 1.12.262 | S3A access to SeaweedFS; it must match Spark's Hadoop 3.3.4 |
 | `postgresql` JDBC | 42.7.7 | read `oms`, write `dwh` |
 | `delta-spark` (Python, `--no-deps`) | 3.3.3 | the `delta.tables` API; `--no-deps` stops pip from installing a second PySpark |
+| `great_expectations` | 0.18.19 | the validate stage of DP1 to DP3 ([pipelines.md](pipelines.md)) |
 
 This first image is deliberately naive: one stage, jars downloaded at build time, and a `chmod`
-in its own layer. It is 2.05 GB, against 1.13 GB for the base image. The Docker optimization step
+in its own layer. It is 2.57 GB (2.05 GB before Great Expectations was added), against 1.13 GB for the base
+image. The Docker optimization step
 rewrites it as a multi-stage build and measures both with the same size measure
 ([environment.md](environment.md#image-inventory)).
 

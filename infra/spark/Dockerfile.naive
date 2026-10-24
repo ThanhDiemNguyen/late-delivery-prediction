@@ -3,6 +3,7 @@
 #   delta-spark + delta-storage 3.3.3   Delta Lake tables (delta-spark 3.3.x supports Spark 3.5)
 #   hadoop-aws 3.3.4 + AWS SDK 1.12.262 S3A access to SeaweedFS (matches Spark's Hadoop 3.3.4)
 #   postgresql 42.7.7                   JDBC reads of oms and writes to dwh
+#   great_expectations 0.18.19          the validate stage of DP1 to DP3 (the course's version)
 FROM apache/spark:3.5.9-scala2.12-java17-python3-ubuntu
 
 USER root
@@ -14,5 +15,6 @@ ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.7/postgresql-4
 # The delta Python API only; --no-deps keeps pip from installing a second PySpark.
 RUN chmod 644 /opt/spark/jars/*.jar \
     && pip3 install --no-cache-dir --no-deps delta-spark==3.3.3 importlib_metadata==8.5.0 zipp==3.21.0 \
+    && pip3 install --no-cache-dir great_expectations==0.18.19 \
     && mkdir -p /opt/spark/events && chown spark:spark /opt/spark/events
 USER spark

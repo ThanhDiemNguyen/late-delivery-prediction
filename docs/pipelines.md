@@ -91,7 +91,64 @@ Trino lists all 7 tables in `delta.bronze`. The merged ping schema shows both ap
  4.0.0       | 24087996 |         0 |  24087996 |    24087996
 ```
 
-### Pitfalls
+## DP1: validate bronze (`jobs/validate.py --suite dp1`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.py --suite dp1 --ds 2024-09-07 --fail-on-error
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/validate.py --suite dp1 --ds 2024-09-07 --fail-on-error --corrupt
+```
+
+**How it runs.** Great Expectations 0.18.19, the course's version, runs on Spark DataFrames through
+its legacy `SparkDFDataset` API, so every expectation is a Spark query.
+
+**What it checks.** Each run checks only the slice one DP1 run loads, so the cost does not grow
+with the table:
+
+- the export date `ds` of the pings and scans;
+- the `oms` rows changed on local day `ds` (orders by `updated_ts`, courier changes by
+  `changed_ts`);
+- the small reference tables in full.
+
+**What it checks for.** Bronze keeps the source problems on purpose, so the suite checks that the
+data is what the sources promise. It does not check that the data is clean.
+
+| Table | Expectations |
+|---|---|
+| `raw_hubs` | 40 rows, unique `hub_id`, coordinates inside the LA box |
+| `raw_couriers` | unique `courier_id`, no NULL attributes, vehicle in {van, car, e-bike}, rating 1 to 5 |
+| `raw_courier_changes` | unique `change_id`, no NULL snapshot attributes |
+| `raw_customers` | unique `customer_id`, no NULL home point, home latitude inside the LA box |
+| `raw_orders` | rows exist, unique `order_id`, keys and timestamps not NULL, `traffic` and `area` only in the legacy spellings, `status` delivered |
+| `raw_courier_pings` | rows exist, all 16 columns of the merged v1 + v2 schema exist, keys not NULL, `app_version` 3.14.2 or 4.0.0, positions within a degree of the LA box |
+| `raw_parcel_scans` | rows exist, unique `scan_id`, keys not NULL, `scan_type` at_hub, picked_up or delivered |
+
+**Results.** The results go to `s3a://lakehouse/_validation/dp1/ds=<ds>/results.json`: one JSON
+document with every expectation, its outcome and the observed counts.
+
+- **Exit code:** with `--fail-on-error` the job exits 1 when any expectation fails.
+- **In Airflow:** without the flag it exits 0, so the next task can publish the results to DataHub
+  before stopping the pipeline.
+- **`--corrupt`:** validates a corrupted copy of the same slice. It changes nothing in the
+  lakehouse.
+
+### Checks on the dev slice (2024-09-07, a v2 rollout day)
+
+| Batch | Result | Exit code |
+|---|---|---|
+| clean | 73 of 73 expectations passed (28 s) | 0 |
+| corrupted | 68 of 73 passed (30 s) | 1 |
+
+The five failures are exactly the five injected problems:
+
+| Injected problem | Failed expectation | Observed |
+|---|---|---|
+| 25 orders duplicated | `order_id` unique | 50 of 3,927 rows not unique |
+| 1% of orders with traffic `"Gridlock"` | `traffic` in the legacy set | 44 of 3,927 (1.12%) |
+| 1% of pings with NULL `courier_id` | `courier_id` not NULL | 2,791 of 277,608 (1.01%) |
+| 0.1% of pings at latitude 0 | `lat` between 32.7 and 35.8 | 248 of 277,608 (0.09%) |
+| 1% of scans with type `"lost"` | `scan_type` in set | 121 of 11,855 (1.02%) |
+
+### DP1 pitfalls
 
 - **Watermark time zone.** The watermark is formatted by Spark in the session time zone (UTC),
   not by Python, whose time zone depends on the container.
