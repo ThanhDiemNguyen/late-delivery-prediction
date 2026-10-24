@@ -200,14 +200,16 @@ def build_reference(scale: float, seed_value: int = DEFAULT_SEED) -> dict[str, p
 def load(frames: dict[str, pd.DataFrame], replace: bool) -> None:
     """Create the tables if needed and load the frames in one transaction.
 
-    Refuses to touch tables that already hold rows unless replace is True.
+    Refuses to touch tables that already hold rows unless replace is True. Replacing also empties
+    orders: they reference the hubs, couriers and customers being replaced, and Postgres refuses to
+    truncate a referenced table on its own.
     """
     with db.connect("oms") as conn, conn.cursor() as cur:
         cur.execute(SCHEMA_SQL.read_text())
         cur.execute("SELECT (SELECT count(*) FROM hubs) + (SELECT count(*) FROM couriers) + (SELECT count(*) FROM customers)")
         if cur.fetchone()[0] and not replace:
             raise SystemExit("oms already holds reference data; run again with --replace to overwrite it")
-        cur.execute("TRUNCATE courier_changes, customers, couriers, hubs")
+        cur.execute("TRUNCATE orders, courier_changes, customers, couriers, hubs")
         for table in TABLES:
             db.copy_frame(cur, table, frames[table])
 
