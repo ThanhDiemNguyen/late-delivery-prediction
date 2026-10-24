@@ -61,7 +61,7 @@ Start them with `cp .env.example .env` (then change the passwords) and
 ├── jobs/                Spark jobs, run inside spark-master with spark-submit
 ├── infra/
 │   ├── postgres/init/   SQL run on the first start of Postgres (creates the databases)
-│   ├── spark/           the Spark image (Dockerfile.naive) and spark-defaults.conf
+│   ├── spark/           the Spark image (Dockerfile.naive) and conf/spark-defaults.conf
 │   └── trino/catalog/   Trino catalog delta (Delta tables through the Hive Metastore)
 ├── scripts/
 │   └── safe-shutdown.sh stop everything, quit Docker Desktop and eject the SSD

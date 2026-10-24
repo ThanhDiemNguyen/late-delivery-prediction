@@ -31,7 +31,10 @@ def main() -> None:
 
     spark.sql("CREATE DATABASE IF NOT EXISTS smoke LOCATION 's3a://lakehouse/smoke'")
     per_hub = pings.groupBy("hub_id").agg(F.count("*").alias("pings"), F.countDistinct("courier_id").alias("couriers"))
-    per_hub.write.format("delta").mode("overwrite").saveAsTable("smoke.pings_per_hub")
+    # Dropped first: overwriting an existing managed Delta table makes Spark try to alter the
+    # metastore schema, which Hive Metastore 3.1 rejects with a logged (harmless) error.
+    spark.sql("DROP TABLE IF EXISTS smoke.pings_per_hub")
+    per_hub.write.format("delta").saveAsTable("smoke.pings_per_hub")
     back = spark.table("smoke.pings_per_hub")
     detail = spark.sql("DESCRIBE DETAIL smoke.pings_per_hub").select("format", "location", "numFiles").first()
     print(f"[delta] smoke.pings_per_hub: {back.count()} hubs, {back.agg(F.sum('pings')).first()[0]:,} pings; "

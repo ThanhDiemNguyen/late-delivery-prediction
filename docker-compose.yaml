@@ -181,7 +181,9 @@ services:
       - "127.0.0.1:8080:8080"   # master UI
       - "127.0.0.1:4040:4040"   # UI of the job running in this container
     volumes: &spark-volumes
-      - ./infra/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      # Config is mounted as a folder: a single-file mount keeps pointing at the old file after git
+      # replaces it (for example on checkout), and the container then cannot find it.
+      - ./infra/spark/conf:/opt/spark/conf:ro
       - ./jobs:/opt/jobs:ro
       - spark_events:/opt/spark/events
     healthcheck:
@@ -242,7 +244,7 @@ services:
     ports:
       - "127.0.0.1:8090:8080"   # Trino (8080 on the Mac is the Spark master UI)
     volumes:
-      - ./infra/trino/catalog/delta.properties:/etc/trino/catalog/delta.properties:ro
+      - ./infra/trino/catalog:/etc/trino/catalog:ro   # a folder, for the same reason as Spark's conf
     healthcheck:
       test: ["CMD", "/usr/lib/trino/bin/health-check"]
       interval: 10s

@@ -47,7 +47,7 @@ in its own layer. It is 2.05 GB, against 1.13 GB for the base image. The Docker 
 rewrites it as a multi-stage build and measures both with the same size measure
 ([environment.md](environment.md#image-inventory)).
 
-**Shared settings.** `infra/spark/spark-defaults.conf` is mounted into every Spark container.
+**Shared settings.** `infra/spark/conf/spark-defaults.conf` is mounted into every Spark container.
 
 - **Catalog and Delta:** the Delta SQL extension and catalog, and the Hive Metastore as catalog
   (`thrift://hive-metastore:9083`).
@@ -120,6 +120,12 @@ hub is Downtown LA (hub 1) with 70,548 pings. From the Mac, the Python Trino cli
   all five write paths, and the Python package accepts PySpark 3.5.3 to 3.5.x.
 - **Profiles stack.** `--profile batch` alone fails ("depends on undefined service postgres"),
   because Postgres and SeaweedFS are in `core`. Always pass `--profile core` as well.
+- **Config is mounted as folders.** `infra/spark/conf/` and `infra/trino/catalog/` are mounted as
+  whole folders. A single-file bind mount follows the file's inode, so after `git checkout`
+  replaced `spark-defaults.conf`, the running containers could no longer find it
+  (`FileNotFoundException`). With folder mounts, the containers see the new file.
+  The Trino catalog folder replaces the image's demo catalogs (`tpch`, `jmx` and the others), and
+  only `delta` is needed.
 - **The metastore image wants empty cloud variables.** Its start script stops unless 14
   Azure/GCS variables exist, so the Compose file sets them to `""`, as the course lab did.
 - **The metastore's own log.** Its start script traces commands with `set -x`. A check of its log
