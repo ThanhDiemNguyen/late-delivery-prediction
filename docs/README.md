@@ -17,3 +17,4 @@ Documents are added here as each part is built.
 | [novel_h3_sedona.md](novel_h3_sedona.md) | Novel idea 1: H3 delivery zones with Apache Sedona (dim_zone, drop_zone_id, feat_zone_daily) and the proofs that it worked |
 | [novel_cdf_incremental.md](novel_cdf_incremental.md) | Novel idea 2: incremental DP3 from Delta's Change Data Feed, and the proof that it equals a full recompute |
 | [airflow.md](airflow.md) | Airflow: the image with a Spark client, services, connections, variables and pool from .env, the DP1 to DP3 DAGs and the failure drill |
+| [datahub.md](datahub.md) | DataHub: services, schema ingestion of every zone (Trino, Postgres, Kafka recipes), URNs for lineage |

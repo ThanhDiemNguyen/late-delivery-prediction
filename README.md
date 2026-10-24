@@ -34,7 +34,7 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 ## Architecture
 
 The full deployment diagram is added once all the services exist. The deployable units built so
-far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch`, `query` and `orch` profiles:
+far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch`, `query`, `orch` and `gov` profiles:
 
 | Unit | Role |
 |---|---|
@@ -45,6 +45,7 @@ far are in the `core` Compose profile ([details](docs/core_services.md)) and the
 | Spark master, worker, history server | builds the Delta tables in bucket `lakehouse` (profile `batch`) |
 | Trino | SQL over the Delta tables for DBeaver and DataHub (profile `query`) |
 | Airflow webserver, scheduler | runs DP1 to DP3 (profile `orch`, [details](docs/airflow.md)) |
+| DataHub GMS, frontend, OpenSearch | catalog, lineage and data quality (profile `gov`, [details](docs/datahub.md)) |
 
 Start them with `cp .env.example .env` (then change the passwords) and
 `docker compose --profile core --profile batch up -d --wait`.
@@ -60,6 +61,7 @@ Start them with `cp .env.example .env` (then change the passwords) and
 ├── seed/                the Kaggle seed file (gzipped) and its MIT license
 ├── tests/               pytest checks, run with: uv run pytest
 ├── airflow/            Airflow DAGs and the init script for connections, variables and pool
+├── datahub/recipes/    DataHub ingestion recipes (Trino lakehouse, Postgres oms and dwh, Kafka)
 ├── jobs/                Spark jobs (DP1 ingest and validation, DP2 silver, gold and the warehouse, DP3 features), run inside spark-master with spark-submit
 │   └── sql/             DDL of the dwh star schema
 ├── infra/

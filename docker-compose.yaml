@@ -6,6 +6,39 @@
 
 name: ${COMPOSE_PROJECT_NAME:-late-delivery-prediction}
 
+# Environment shared by DataHub's system-update job and GMS (profile gov). The metadata lives in
+# the datahub database of the shared Postgres, the search index in OpenSearch, and the event
+# topics in the core Kafka. GMS runs DataHub's internal schema registry.
+x-datahub-env: &datahub-env
+  EBEAN_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datahub
+  EBEAN_DATASOURCE_DRIVER: org.postgresql.Driver
+  EBEAN_DATASOURCE_USERNAME: ${POSTGRES_USER}
+  EBEAN_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+  EBEAN_DATASOURCE_HOST: postgres:5432
+  ELASTICSEARCH_HOST: opensearch
+  ELASTICSEARCH_PORT: "9200"
+  ELASTICSEARCH_PROTOCOL: http
+  ELASTICSEARCH_USE_SSL: "false"
+  ELASTICSEARCH_IMPLEMENTATION: opensearch
+  ELASTICSEARCH_INDEX_BUILDER_MAPPINGS_REINDEX: "true"
+  ELASTICSEARCH_INDEX_BUILDER_SETTINGS_REINDEX: "true"
+  ELASTICSEARCH_BUILD_INDICES_CLONE_INDICES: "false"
+  KAFKA_BOOTSTRAP_SERVER: kafka:19092
+  KAFKA_SCHEMAREGISTRY_URL: http://datahub-gms:8080/schema-registry/api/
+  SCHEMA_REGISTRY_TYPE: INTERNAL
+  USE_CONFLUENT_SCHEMA_REGISTRY: "false"
+  GRAPH_SERVICE_IMPL: elasticsearch
+  ENTITY_REGISTRY_CONFIG_PATH: /datahub/datahub-gms/resources/entity-registry.yml
+  DATAHUB_SQL_SETUP_ENABLED: "true"
+  DATAHUB_PRECREATE_TOPICS: "true"   # the broker does not auto-create topics
+  PARTITIONS: "1"
+  METADATA_SERVICE_AUTH_ENABLED: "false"   # GMS listens on 127.0.0.1 and the compose network only
+  DATAHUB_TOKEN_SERVICE_SIGNING_KEY: ${DATAHUB_TOKEN_SIGNING_KEY}
+  DATAHUB_TOKEN_SERVICE_SALT: ${DATAHUB_TOKEN_SALT}
+  DATAHUB_GMS_HOST: datahub-gms
+  DATAHUB_GMS_PORT: "8080"
+  DATAHUB_TELEMETRY_ENABLED: "false"
+
 services:
   # ---------- core: the source systems and the event broker ----------
 
@@ -333,9 +366,103 @@ services:
       retries: 20
       start_period: 30s
 
+  # ---------- gov: DataHub (profile gov; runs on top of core) ----------
+
+  # Search and graph index of DataHub.
+  opensearch:
+    image: opensearchproject/opensearch:2.19.7
+    profiles: [gov]
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m   # the image default is 1 GB (docs/environment.md)
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS --fail 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=0s'"]
+      interval: 10s
+      retries: 20
+      start_period: 60s
+
+  # One-shot: the SQL schema, the search indices and the Kafka topics, then it exits.
+  datahub-system-update:
+    image: acryldata/datahub-upgrade:v1.5.0.6
+    profiles: [gov]
+    command: ["-u", "SystemUpdate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    environment:
+      <<: *datahub-env
+      # Only here, as in DataHub's quickstart: on GMS too, its consumers stop and nothing is indexed.
+      SCHEMA_REGISTRY_SYSTEM_UPDATE: "true"
+      SPRING_KAFKA_PROPERTIES_AUTO_REGISTER_SCHEMAS: "true"
+      SPRING_KAFKA_PROPERTIES_USE_LATEST_VERSION: "true"
+      JAVA_OPTS: -Xms256m -Xmx512m
+
+  # The metadata service: REST API and graph, with its Kafka consumers built in.
+  datahub-gms:
+    image: acryldata/datahub-gms:v1.5.0.6
+    profiles: [gov]
+    hostname: datahub-gms
+    depends_on:
+      datahub-system-update:
+        condition: service_completed_successfully
+    environment:
+      <<: *datahub-env
+      JAVA_OPTS: -Xms512m -Xmx1g   # the image sets no heap, so the JVM would take 25% of the VM
+      MAE_CONSUMER_ENABLED: "true"
+      MCE_CONSUMER_ENABLED: "true"
+      PE_CONSUMER_ENABLED: "true"
+      UI_INGESTION_ENABLED: "false"   # recipes run from the command line (datahub/recipes/)
+      DATAHUB_UPGRADE_HISTORY_KAFKA_CONSUMER_GROUP_ID: generic-duhe-consumer-job-client-gms
+      ES_BULK_REFRESH_POLICY: NONE
+      DATAHUB_SERVER_TYPE: quickstart
+      ENTITY_SERVICE_ENABLE_RETENTION: "true"
+    ports:
+      - "127.0.0.1:8083:8080"   # 8080 on the Mac is the Spark master UI
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS --fail http://localhost:8080/health"]
+      interval: 10s
+      retries: 30
+      start_period: 90s
+
+  # The UI. Its login comes from DATAHUB_ADMIN_PASSWORD, written to user.props at start, so no
+  # password file is committed.
+  datahub-frontend:
+    image: acryldata/datahub-frontend-react:v1.5.0.6
+    profiles: [gov]
+    depends_on:
+      datahub-gms:
+        condition: service_healthy
+    environment:
+      DATAHUB_GMS_HOST: datahub-gms
+      DATAHUB_GMS_PORT: "8080"
+      DATAHUB_SECRET: ${DATAHUB_SECRET}
+      DATAHUB_APP_VERSION: v1.5.0.6
+      DATAHUB_ADMIN_PASSWORD: ${DATAHUB_ADMIN_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVER: kafka:19092
+      ELASTIC_CLIENT_HOST: opensearch
+      ELASTIC_CLIENT_PORT: "9200"
+      JAVA_OPTS: -Xms256m -Xmx512m
+    command: ["/bin/sh", "-c", "printf 'datahub:%s\\n' \"$$DATAHUB_ADMIN_PASSWORD\" > /datahub-frontend/conf/user.props && exec ./start.sh"]
+    ports:
+      - "127.0.0.1:9002:9002"   # UI: user datahub, password DATAHUB_ADMIN_PASSWORD from .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS --fail http://localhost:9002/admin >/dev/null"]
+      interval: 15s
+      retries: 30
+      start_period: 60s
+
 volumes:
   postgres_data:
   seaweedfs_data:
   kafka_data:
   spark_events:
   airflow_logs:
+  opensearch_data:
