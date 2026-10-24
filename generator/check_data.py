@@ -4,7 +4,8 @@
 
 Reads oms with SQL and the app-exports bucket with pyarrow. Each check compares a measured value
 with a target and a tolerance; the command exits with status 1 if any check fails. The printed
-tables are the numbers in docs/data_characteristics.md. At full scale the same checks run in Spark.
+tables are the numbers in docs/data_characteristics.md. The exports are read one file at a time, so
+the same command runs at full scale (--scale 1.0) in about half an hour.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
-import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -116,6 +117,7 @@ def check_oms(cur, scale: float, checks: list[Check], facts: dict) -> None:
     cur.execute("SELECT relname, pg_total_relation_size(relid) FROM pg_catalog.pg_statio_user_tables ORDER BY 2 DESC")
     facts["oms bytes"] = dict(cur.fetchall())
     facts["oms rows"] = counts
+    facts["max order_id"] = _one(cur, "SELECT max(order_id) FROM orders")
     cur.execute("SELECT hired_ts FROM couriers")
     hired = pd.Series([r[0] for r in cur.fetchall()])
     facts["active courier-days"] = int(sum((hired < d.tz_convert("UTC")).sum() for d in local_days()))
@@ -178,24 +180,25 @@ def check_exports(scale: float, checks: list[Check], facts: dict) -> None:
         "pings.trip_id (non-null)": trip_distinct / trip_ids,
     })
 
-    scan_rows = scan_bytes = 0
-    scan_ids = []
+    # scan_id is order_id * 3 - 2 + k (k = 0, 1, 2), so one flag per possible id counts the distinct ids
+    # exactly in 3 bytes per order (242 MB at full scale) instead of holding every id.
+    scan_rows = scan_bytes = out_of_range = 0
+    seen = np.zeros(3 * facts["max order_id"] + 1, dtype=bool)
     for obj in (o for o in _objects(s3, SCANS) if o["Key"].endswith(".parquet")):
         table = pq.read_table(io.BytesIO(s3.get_object(Bucket=BUCKET, Key=obj["Key"])["Body"].read()), columns=["scan_id"])
         scan_rows, scan_bytes = scan_rows + table.num_rows, scan_bytes + obj["Size"]
-        scan_ids.append(table.column("scan_id"))
-    distinct_scans = len(pc.unique(pa_concat(scan_ids)))
+        ids = table.column("scan_id").to_numpy()
+        inside = (ids >= 1) & (ids < len(seen))
+        out_of_range += int((~inside).sum())
+        seen[ids[inside]] = True
+    distinct_scans = int(np.count_nonzero(seen)) + out_of_range
     checks += [
         Check("scans (3 per order)", scan_rows, 3 * facts["oms rows"]["orders"], 0),
         Check("distinct scan_id", distinct_scans, scan_rows, 0),
+        Check("scan ids outside 1 to 3 x max(order_id)", out_of_range, 0, 0),
     ]
     facts["scans"] = {"rows": scan_rows, "bytes": scan_bytes}
     facts["cardinality"]["scans.scan_id"] = distinct_scans / scan_rows
-
-
-def pa_concat(chunks):
-    """Concatenate pyarrow arrays or chunked arrays into one chunked array."""
-    return pa.chunked_array([c for chunk in chunks for c in (chunk.chunks if hasattr(chunk, "chunks") else [chunk])])
 
 
 def main() -> None:
