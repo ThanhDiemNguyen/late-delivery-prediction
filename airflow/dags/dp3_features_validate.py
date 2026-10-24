@@ -12,7 +12,7 @@ publish_assertions succeeds even after a failed suite, so checks_passed carries 
 """
 
 from airflow import DAG
-from airflow.operators.empty import EmptyOperator
+from airflow.operators.bash import BashOperator
 from datahub_assertions import publish_assertions
 from lakehouse_tasks import DEFAULT_ARGS, PERIOD_START, lake, spark_job
 
@@ -37,5 +37,7 @@ with DAG(
         inlets=FEATURES,
     )
     incremental = spark_job("validate_incremental", "check_cdf.py", [], retries=0, inlets=FEATURES + GOLD_IN)
-    features >> [suite, incremental] >> EmptyOperator(task_id="checks_passed")
+    # A task that runs (not an EmptyOperator, which the scheduler skips), so DataHub gets its name too.
+    passed = BashOperator(task_id="checks_passed", bash_command="echo validate_suite and validate_incremental passed")
+    features >> [suite, incremental] >> passed
     suite >> publish_assertions("dp3", "validate_suite")
