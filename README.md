@@ -33,49 +33,63 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 
 ## Architecture
 
-The full deployment diagram is added once all the services exist. The deployable units built so
-far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch`, `query`, `orch` and `gov` profiles:
+![Deployment diagram](docs/images/architecture/deployment.png)
 
-| Unit | Role |
-|---|---|
-| Postgres 16 | source database `oms` (order system), plus the `dwh`, `airflow`, `metastore` and `datahub` databases |
-| SeaweedFS | S3 object store: bucket `app-exports` (courier-app exports, a source) and bucket `lakehouse` |
-| Kafka (KRaft) | live parcel-scan events and Flink output topics |
-| Hive Metastore | catalog of the lakehouse tables (profiles `batch` and `query`, [details](docs/lakehouse.md)) |
-| Spark master, worker, history server | builds the Delta tables in bucket `lakehouse` (profile `batch`) |
-| Trino | SQL over the Delta tables for DBeaver and DataHub (profile `query`) |
-| Airflow webserver, scheduler | runs DP1 to DP3 (profile `orch`, [details](docs/airflow.md)) |
-| DataHub GMS, frontend, OpenSearch | catalog, lineage and data quality (profile `gov`, [details](docs/datahub.md)) |
+Every box is a deployable unit: a container of one Compose profile, or a process run on the Mac.
+Arrows follow the data and carry it as their label. Each flow has its own colour and numbering,
+and the two dashed arrows are calls that carry no data. The source is
+[`docs/images/architecture/deployment.dot`](docs/images/architecture/deployment.dot) (Graphviz).
 
-Start them with `cp .env.example .env` (then change the passwords) and
-`docker compose --profile core --profile batch up -d --wait`.
+| Flow | Colour | What moves |
+|---|---|---|
+| Batch, B1 to B12 | blue | The generator fills the sources, `oms` and `app-exports` (B1, B2). Airflow submits DP1 to DP3 to Spark (B3). DP1 copies changed rows and new export dates into bronze (B4, B5). DP2 and DP3 build silver, gold and the features (B6), register the tables in the Hive Metastore (B7) and load the `dwh` star schema (B8). Trino serves the lakehouse and Postgres serves `dwh` to analysts (B10 to B12). |
+| Stream, S1 to S3 | orange | The scan producer replays parcel scans into Kafka, with event time as the record time (S1). Flink reads them (S2) and writes 5-minute hub counts and late scans back (S3). |
+| Governance, G1 to G7 | green | The DataHub recipes read the schemas of every zone (G1, G2). Airflow's DataHub plugin sends each task's lineage, and the Great Expectations results as assertions (G3, G4). The frontend shows the catalog, lineage and quality (G7). |
+
+| Profile | Deployable units | Details |
+|---|---|---|
+| `core` | Postgres 16 (`oms`, `dwh`, `airflow`, `metastore`, `datahub`), SeaweedFS (buckets `app-exports`, `lakehouse`), Kafka 3.9 | [core_services.md](docs/core_services.md) |
+| `batch` | Hive Metastore, Spark 3.5.9 master, worker and history server, with Delta Lake 3.3.3 | [lakehouse.md](docs/lakehouse.md) |
+| `query` | Trino 479 | [lakehouse.md](docs/lakehouse.md) |
+| `orch` | Airflow 2.10.5 webserver and scheduler | [airflow.md](docs/airflow.md) |
+| `gov` | DataHub v1.5.0.6 GMS and frontend, OpenSearch | [datahub.md](docs/datahub.md) |
+| `stream` | Flink 1.20.5 jobmanager and taskmanager (PyFlink) | [streaming.md](docs/streaming.md) |
+| on the Mac | the data generator, the scan producer, the DataHub ingestion | [data_generator.md](docs/data_generator.md) |
+
+Start the platform with `cp .env.example .env` (then change the passwords) and
+`docker compose --profile core --profile batch --profile query --profile orch --profile gov --profile stream up -d --wait`.
+Each profile can also start on its own, on top of `core`.
 
 ## Repo structure
 
 ```text
 .
 ├── README.md            this file: domain, architecture, structure, links to docs
-├── docker-compose.yaml  every service, grouped by Compose profile (core so far)
-├── generator/           host-Python data generator: seed model, LA config, oms tables, app exports, checks
+├── docker-compose.yaml  every service, grouped by Compose profile
+├── generator/           host-Python data generator (seed model, LA config, oms tables, app exports),
+│   │                    the scan producer, and the checks of the generated data and the stream
 │   └── sql/             DDL of the oms tables, applied by the generator
-├── seed/                the Kaggle seed file (gzipped) and its MIT license
-├── tests/               pytest checks, run with: uv run pytest
-├── airflow/            Airflow DAGs and the init script for connections, variables and pool
-├── datahub/recipes/    DataHub ingestion recipes (Trino lakehouse, Postgres oms and dwh, Kafka)
-├── jobs/                Spark jobs (DP1 ingest and validation, DP2 silver, gold and the warehouse, DP3 features), run inside spark-master with spark-submit
-│   └── sql/             DDL of the dwh star schema
+├── jobs/                Spark jobs: DP1 ingest, DP2 silver, gold and warehouse, DP3 features,
+│   │                    the validation suites, the checks, and the benchmarks
+│   └── sql/             DDL of the dwh star schema and its indexes
+├── airflow/             the DP1 to DP3 DAGs (dags/) and the init script for connections, variables and pool
+├── flink/jobs/          the PyFlink window job (scan_windows.py)
+├── datahub/recipes/     DataHub ingestion recipes (Trino lakehouse, Postgres oms and dwh, Kafka)
 ├── infra/
 │   ├── postgres/init/   SQL run on the first start of Postgres (creates the databases)
-│   ├── airflow/         the Airflow image (Dockerfile.naive)
-│   ├── spark/           the Spark image (Dockerfile.naive) and conf/spark-defaults.conf
+│   ├── spark/           the Spark image (Dockerfile, Dockerfile.naive) and conf/spark-defaults.conf
+│   ├── airflow/         the Airflow image (Dockerfile, Dockerfile.naive)
+│   ├── flink/           the Flink image (Dockerfile, Dockerfile.naive)
 │   └── trino/catalog/   Trino catalog delta (Delta tables through the Hive Metastore)
-├── scripts/
-│   └── safe-shutdown.sh stop everything, quit Docker Desktop and eject the SSD
-├── docs/                one document per major part, linked from docs/README.md
+├── scripts/             safe-shutdown.sh (stop and eject the SSD), disk-watch.sh (stop jobs at low disk),
+│                        schema_catalog.py (naming check, diagrams), dwh_indexes.py (index measurements)
+├── tests/               pytest checks, run with: uv run pytest
+├── seed/                the Kaggle seed file (gzipped) and its MIT license
+├── docs/                one document per major part, with its screenshots in docs/images/
 ├── pyproject.toml       Python project settings, dependencies and the ruff lint rules
 ├── uv.lock              exact versions of every Python dependency
-├── .env.example     template for the local .env file (the real .env is never committed)
-└── .gitignore       files and folders that git must never track
+├── .env.example         template for the local .env file (the real .env is never committed)
+└── .gitignore           files and folders that git must never track
 ```
 
 ## Requirements
@@ -90,3 +104,19 @@ Start them with `cp .env.example .env` (then change the passwords) and
 ## Documentation
 
 All detailed documents live in [`docs/`](docs/README.md). This README only summarizes them.
+
+| Document | What it shows |
+|---|---|
+| [environment.md](docs/environment.md) | The machine, every image and its size (naive against multi-stage), memory, PyFlink on arm64, disk safety, the safe stop |
+| [core_services.md](docs/core_services.md) | Postgres, SeaweedFS and Kafka |
+| [data_generator.md](docs/data_generator.md) | How the source data is generated, with its dirty values, schema change and duplicates |
+| [data_characteristics.md](docs/data_characteristics.md) | The generated data: volume, skew, cardinality, schemas, duplicate rates |
+| [lakehouse.md](docs/lakehouse.md) | Hive Metastore, Spark, Delta Lake and Trino |
+| [pipelines.md](docs/pipelines.md) | The DP1 to DP3 Spark jobs and their validation suites |
+| [schema_design.md](docs/schema_design.md) | The tables of every zone, their relationships and the naming check |
+| [airflow.md](docs/airflow.md) | The three DAGs, connections, variables and pool, and the failure drill |
+| [datahub.md](docs/datahub.md) | Schemas, lineage and data quality in DataHub |
+| [streaming.md](docs/streaming.md) | The scan stream and the Flink window job: baseline, allowed lateness, dedup |
+| [storage_optimization.md](docs/storage_optimization.md) | Warehouse indexes and the lakehouse file layout |
+| [novel_h3_sedona.md](docs/novel_h3_sedona.md) | Novel idea 1: H3 delivery zones with Apache Sedona |
+| [novel_cdf_incremental.md](docs/novel_cdf_incremental.md) | Novel idea 2: incremental DP3 from Delta's Change Data Feed |

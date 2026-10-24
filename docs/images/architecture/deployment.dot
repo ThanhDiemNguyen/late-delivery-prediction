@@ -1,0 +1,88 @@
+// Deployment diagram of the LastLeg Logistics data platform (README.md).
+// Every box is a deployable unit (a container, or a host process); arrows follow the data and carry
+// it as their label. Each flow has its own colour and numbering: batch B (blue), stream S (orange),
+// governance G (green). Dashed arrows are calls that carry no data.
+// Render: dot -Tpng -Gdpi=100 docs/images/architecture/deployment.dot -o docs/images/architecture/deployment.png
+digraph deployment {
+  rankdir=TB; newrank=true; nodesep=0.6; ranksep=1.1;
+  node [shape=box style="rounded,filled" fillcolor="#ffffff" fontname="Helvetica" fontsize=11 margin="0.15,0.08"];
+  edge [fontname="Helvetica" fontsize=9 arrowsize=0.7];
+
+  subgraph cluster_host_sources { label="Mac (host processes)"; style="rounded,dashed"; color="#8a8a8a"; fontname="Helvetica";
+    generator [label="Data generator\n(generator/*.py)"];
+    producer  [label="Scan producer\n(generator/scan_producer.py)"];
+  }
+  subgraph cluster_core { label="profile core"; style=rounded; color="#4a4a4a"; fontname="Helvetica";
+    pg [shape=record style="rounded" label="{Postgres 16|<oms> oms|<dwh> dwh|<airflow> airflow|<metastore> metastore|<datahub> datahub}"];
+    s3 [shape=record style="rounded" label="{SeaweedFS (S3)|<exports> app-exports|<lake> lakehouse}"];
+    kafka [shape=record style="rounded" label="{Kafka 3.9 (KRaft)|<scans> parcel-scans(-replay)|<out> hub-delivery-5m, scans-late}"];
+  }
+  subgraph cluster_orch { label="profile orch"; style=rounded; color="#4a4a4a"; fontname="Helvetica";
+    scheduler [label="Airflow scheduler\n(DP1 to DP3, Spark drivers)"];
+    webserver [label="Airflow webserver"];
+  }
+  subgraph cluster_batch { label="profile batch"; style=rounded; color="#4a4a4a"; fontname="Helvetica";
+    master [label="Spark master"];
+    worker [label="Spark worker\n(executors)"];
+    hms    [label="Hive Metastore"];
+    history [label="Spark history server"];
+  }
+  subgraph cluster_stream { label="profile stream"; style=rounded; color="#4a4a4a"; fontname="Helvetica";
+    jm [label="Flink jobmanager"];
+    tm [label="Flink taskmanager\n(scan_windows.py)"];
+  }
+  subgraph cluster_query { label="profile query"; style=rounded; color="#4a4a4a"; fontname="Helvetica";
+    trino [label="Trino 479"];
+  }
+  subgraph cluster_host_ingest { label="Mac (host process)"; style="rounded,dashed"; color="#8a8a8a"; fontname="Helvetica";
+    ingest [label="DataHub ingestion\n(datahub ingest, recipes)"];
+  }
+  subgraph cluster_gov { label="profile gov"; style=rounded; color="#4a4a4a"; fontname="Helvetica";
+    gms [label="DataHub GMS"];
+    opensearch [label="OpenSearch" shape=cylinder];
+    frontend [label="DataHub frontend"];
+  }
+  analyst [label="Analyst\n(DBeaver, browser)" shape=oval fillcolor="#f3f3f3"];
+
+  { rank=same; generator; producer; }
+  { rank=same; pg; s3; kafka; }
+  { rank=same; scheduler; worker; tm; }
+  { rank=same; trino; ingest; gms; }
+  { rank=same; analyst; frontend; }
+
+  // Batch flow (blue)
+  edge [color="#1f5fbf" fontcolor="#1f5fbf"];
+  generator -> pg:oms        [label="B1 orders, couriers,\nhubs, customers (COPY)"];
+  generator -> s3:exports    [label="B2 pings, scans (Parquet)"];
+  scheduler -> master        [label="B3 spark-submit\nDP1 to DP3" style=dashed];
+  pg:oms -> worker           [label="B4 changed rows\n(JDBC, DP1)"];
+  s3:exports -> worker       [label="B5 export dates (DP1)"];
+  worker -> s3:lake          [label="B6 Delta bronze, silver, gold" constraint=false];
+  worker -> hms              [label="B7 table definitions"];
+  worker -> pg:dwh           [label="B8 star schema (JDBC, DP2)" constraint=false];
+  worker -> history          [label="B9 event logs"];
+  s3:lake -> trino           [label="B10 Delta files"];
+  hms -> trino               [label="B11 table definitions"];
+  trino -> analyst           [label="B12 SQL results"];
+  pg:dwh -> analyst          [label="B12 SQL results (dwh)"];
+
+  // Stream flow (orange)
+  edge [color="#d9730d" fontcolor="#d9730d"];
+  producer -> kafka:scans    [label="S1 scan events\n(event time = record time)"];
+  producer -> jm             [label="flink run" style=dashed];
+  kafka:scans -> tm          [label="S2 scan events"];
+  tm -> kafka:out            [label="S3 5-minute hub counts,\nlate scans" constraint=false];
+
+  // Governance flow (green)
+  edge [color="#2e8b57" fontcolor="#2e8b57"];
+  trino -> ingest            [label="G1 lakehouse schemas"];
+  pg:oms -> ingest           [label="G1 oms, dwh schemas"];
+  kafka:out -> ingest        [label="G1 topics"];
+  ingest -> gms              [label="G2 schemas"];
+  s3:lake -> scheduler       [label="G3 validation results"];
+  scheduler -> gms           [label="G4 lineage, assertions\n(DataHub plugin)"];
+  gms -> opensearch          [label="G5 search index"];
+  gms -> pg:datahub          [label="G6 metadata" constraint=false];
+  gms -> frontend            [label="G7 catalog, lineage,\nquality"];
+  frontend -> analyst        [label="G7 UI"];
+}
