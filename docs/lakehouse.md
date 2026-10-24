@@ -1,4 +1,4 @@
-# Lakehouse: Hive Metastore, Spark and Delta Lake
+# Lakehouse: Hive Metastore, Spark, Delta Lake and Trino
 
 The lakehouse stores the platform's own tables (bronze, silver, gold) as Delta tables in the
 SeaweedFS bucket `lakehouse`.
@@ -6,8 +6,10 @@ SeaweedFS bucket `lakehouse`.
 - **Spark** builds them.
 - **The Hive Metastore** catalogs them, so Spark and Trino can find a table by name.
 
-This page covers the services, the Spark image, how a job runs, and the smoke test that proves
-the whole path works.
+- **Trino** queries them with SQL for DBeaver and DataHub.
+
+This page covers the services, the Spark image, how a job runs, the smoke test that proves the
+whole path works, and Trino.
 
 ## Services (profile `batch`)
 
@@ -70,6 +72,41 @@ $ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/smoke_l
 
 The metastore database holds the table as `smoke | pings_per_hub | MANAGED_TABLE | delta`. The
 history server at `http://127.0.0.1:18080` lists the job as completed. The job took 13 s.
+
+## Trino (profile `query`)
+
+| Service | Image | Role | Port on the Mac | Memory |
+|---|---|---|---|---|
+| `trino` | `trinodb/trino:479` | SQL over the lakehouse: catalog `delta` (`infra/trino/catalog/delta.properties`) | `127.0.0.1:8090` | `mem_limit: 2g`, 991 MiB in use |
+
+The `delta` catalog uses the `delta_lake` connector:
+
+- **Finding tables:** it asks the Hive Metastore, so every table Spark registers appears in Trino
+  under the same schema and name.
+- **Reading files:** it reads them from SeaweedFS with Trino's native S3 file system, with the keys
+  from the container environment (`${ENV:S3_ACCESS_KEY}`).
+- **Memory:** Trino sizes its heap at 80% of the memory it can see, so without `mem_limit` it could
+  take about 12.5 GiB of the VM.
+- **Port:** host port 8090, because 8080 is the Spark master UI.
+
+```bash
+docker compose --profile core --profile batch --profile query up -d --wait
+docker compose exec trino trino --execute "SELECT count(*), sum(pings) FROM delta.smoke.pings_per_hub"
+```
+
+The smoke table reads back with the same numbers Spark wrote: 34 hubs and 239,412 pings. The top
+hub is Downtown LA (hub 1) with 70,548 pings. From the Mac, the Python Trino client on
+`127.0.0.1:8090` gets the same result. That is the path DBeaver uses.
+
+**DBeaver:** New connection, then Trino, with these settings:
+
+| Setting | Value |
+|---|---|
+| Host | `127.0.0.1` |
+| Port | `8090` |
+| User | any name, for example `lastleg` |
+| Password | none |
+| Catalog | `delta` |
 
 ## Decisions and pitfalls
 

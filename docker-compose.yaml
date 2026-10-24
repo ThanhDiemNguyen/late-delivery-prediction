@@ -225,6 +225,30 @@ services:
       interval: 10s
       retries: 12
 
+  # ---------- query: SQL over the lakehouse (profile query) ----------
+
+  # Trino reads the Delta tables through the Hive Metastore (catalog "delta"), for DBeaver and
+  # DataHub. Its JVM heap is 80% of the memory it sees, so mem_limit caps it at 2 GB.
+  trino:
+    image: trinodb/trino:479
+    profiles: [query]
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+    mem_limit: 2g
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    ports:
+      - "127.0.0.1:8090:8080"   # Trino (8080 on the Mac is the Spark master UI)
+    volumes:
+      - ./infra/trino/catalog/delta.properties:/etc/trino/catalog/delta.properties:ro
+    healthcheck:
+      test: ["CMD", "/usr/lib/trino/bin/health-check"]
+      interval: 10s
+      retries: 18
+      start_period: 20s
+
 volumes:
   postgres_data:
   seaweedfs_data:

@@ -34,7 +34,7 @@ EDAI-1 builds the data platform and the feature tables. It does not train a mode
 ## Architecture
 
 The full deployment diagram is added once all the services exist. The deployable units built so
-far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch` profile:
+far are in the `core` Compose profile ([details](docs/core_services.md)) and the `batch` and `query` profiles:
 
 | Unit | Role |
 |---|---|
@@ -43,6 +43,7 @@ far are in the `core` Compose profile ([details](docs/core_services.md)) and the
 | Kafka (KRaft) | live parcel-scan events and Flink output topics |
 | Hive Metastore | catalog of the lakehouse tables (profiles `batch` and `query`, [details](docs/lakehouse.md)) |
 | Spark master, worker, history server | builds the Delta tables in bucket `lakehouse` (profile `batch`) |
+| Trino | SQL over the Delta tables for DBeaver and DataHub (profile `query`) |
 
 Start them with `cp .env.example .env` (then change the passwords) and
 `docker compose --profile core --profile batch up -d --wait`.
@@ -60,7 +61,8 @@ Start them with `cp .env.example .env` (then change the passwords) and
 ├── jobs/                Spark jobs, run inside spark-master with spark-submit
 ├── infra/
 │   ├── postgres/init/   SQL run on the first start of Postgres (creates the databases)
-│   └── spark/           the Spark image (Dockerfile.naive) and spark-defaults.conf
+│   ├── spark/           the Spark image (Dockerfile.naive) and spark-defaults.conf
+│   └── trino/catalog/   Trino catalog delta (Delta tables through the Hive Metastore)
 ├── scripts/
 │   └── safe-shutdown.sh stop everything, quit Docker Desktop and eject the SSD
 ├── docs/                one document per major part, linked from docs/README.md
