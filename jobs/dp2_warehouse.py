@@ -88,6 +88,10 @@ def tables(spark: SparkSession) -> dict[str, DataFrame]:
     }
 
 
+# Tables written in this order, so a BRIN index on the column skips whole block ranges.
+PHYSICAL_ORDER = {"obt_delivery": "order_ts"}
+
+
 def main() -> None:
     """Load gold into the warehouse."""
     spark = lakehouse_session("dp2_warehouse")
@@ -98,7 +102,8 @@ def main() -> None:
     swap = [f"TRUNCATE {', '.join(reversed(LOAD_ORDER))}"]
     for name in LOAD_ORDER:
         columns = ", ".join(rows[name].columns)
-        swap.append(f"INSERT INTO public.{name} ({columns}) SELECT {columns} FROM staging.{name}")
+        order = f" ORDER BY {PHYSICAL_ORDER[name]}" if name in PHYSICAL_ORDER else ""
+        swap.append(f"INSERT INTO public.{name} ({columns}) SELECT {columns} FROM staging.{name}{order}")
     swap.append("DROP SCHEMA staging CASCADE")
     execute(spark, swap)
     counts = spark.read.jdbc(

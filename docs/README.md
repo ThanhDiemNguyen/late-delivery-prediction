@@ -19,4 +19,5 @@ Documents are added here as each part is built.
 | [airflow.md](airflow.md) | Airflow: the image with a Spark client, services, connections, variables and pool from .env, the DP1 to DP3 DAGs and the failure drill |
 | [datahub.md](datahub.md) | DataHub: services, schema ingestion of every zone (Trino, Postgres, Kafka recipes), Airflow lineage of DP1 to DP3, and the Great Expectations results as assertions |
 | [schema_design.md](schema_design.md) | The tables of every zone and their roles, relationship diagrams from the live catalog (dwh's declared keys), SCD2 and feat_ time columns, and the naming check |
+| [storage_optimization.md](storage_optimization.md) | Warehouse indexes on obt_delivery (B-tree, partial, BRIN with an ordered load) measured with EXPLAIN (ANALYZE, BUFFERS); lakehouse file layout |
 | [streaming.md](streaming.md) | The live parcel-scan stream: topics, the event, the producer's late arrivals (8%) and retries (1.50%) and their measurement; the Flink session cluster, the 5-minute window job and its three modes (baseline, allowed lateness, keyed dedup with state TTL), paced runs checked against the truth, and their results |

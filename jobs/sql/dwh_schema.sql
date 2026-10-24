@@ -125,3 +125,10 @@ BEGIN
         ALTER TABLE fact_delivery ADD CONSTRAINT fact_delivery_drop_zone_id_fkey FOREIGN KEY (drop_zone_id) REFERENCES dim_zone;
     END IF;
 END $$;
+
+-- Indexes for the analysts' queries on obt_delivery; each is measured with EXPLAIN (ANALYZE, BUFFERS)
+-- in docs/storage_optimization.md. The load fills obt_delivery in order_ts order, so the BRIN index
+-- can skip every block range outside a time window.
+CREATE INDEX IF NOT EXISTS obt_delivery_hub_promised ON obt_delivery (hub_id, promised_ts);
+CREATE INDEX IF NOT EXISTS obt_delivery_late_hub_delivered ON obt_delivery (hub_id, delivered_ts) WHERE is_late;
+CREATE INDEX IF NOT EXISTS obt_delivery_order_ts_brin ON obt_delivery USING brin (order_ts);
