@@ -11,36 +11,36 @@ The only seed is the Kaggle
 (MIT license, 43,739 orders in India). It is committed gzipped as `seed/amazon_delivery.csv.gz`,
 with its license and checksum in `seed/LICENSE`, so the tests run without a Kaggle account.
 
-The seed is not copied into the platform. It sets only the shapes: how much traffic, weather,
-vehicle, area type, distance and courier rating change the delivery time, and later the distance
-distribution and the dirty-value rates. Every row in the platform is generated.
+The generator does not copy the seed into the platform: it generates every row. The seed sets only
+the shapes. It sets how much traffic, weather, vehicle, area type, distance and courier rating
+change the delivery time. Later, it also sets the distance distribution and the dirty-value rates.
 
 **Usable rows: 39,958 of 43,739.** The model drops a row when:
 - its store point is (0, 0) or sign-flipped, so its distances are wrong;
 - traffic or weather is null;
 - the courier rating is null or outside 1 to 5.
 
-Those dirty rows are not thrown away as patterns: their rates are what the generator injects
-later.
+The generator keeps the rates of these dirty rows and later injects dirty values at those rates.
 
 ## Delivery-time model
 
-Re-weighting seed rows to match LA did not work: only about 3,112 effective rows remained, and
+Re-weighting the seed rows to match LA did not work. Only about 3,112 effective rows remained, and
 Jam traffic came out less late than High. So the generator separates the two questions:
 
-1. **How much does each factor add?** A main-effects model is fitted on the whole seed by least
-   squares (`generator/effect_model.py`):
+1. **How much does each factor add?** `generator/effect_model.py` fits a main-effects model on the
+   whole seed by least squares:
 
    `minutes = intercept + traffic + weather + vehicle + area + 1.73 × km − 43.4 × rating + residual`
 
-2. **How often does each factor occur?** That comes from the LA mix (below), not from the seed.
+2. **How often does each factor occur?** The answer comes from the LA mix (below), not from the
+   seed.
 
 Each generated order gets its factor levels from the LA mix and its expected minutes from the
-model. A residual is then drawn at random from the seed's own residuals, so the noise has the
-seed's real shape, not a bell curve.
+model. Then the generator draws a residual at random from the seed's own residuals. So the noise
+has the seed's real shape instead of a bell curve.
 
-Fit on the seed: R² 0.331, residual standard deviation 42.5 min. Effects, in minutes over the
-fastest level:
+On the seed, the fit has R² 0.331 and a residual standard deviation of 42.5 min. The table shows
+each effect in minutes over the fastest level:
 
 | Factor | Effects |
 |---|---|
@@ -51,9 +51,9 @@ fastest level:
 | Distance | +1.73 min per km |
 | Courier rating | −43.4 min per rating point |
 
-The seed's `motorcycle` and `scooter` are renamed `car` and `e-bike` for LA. The seed spells
-Metropolitan as "Metropolitian"; the model uses the correct name. The misspelling comes back later
-as a dirty value of the order system.
+For LA, the generator renames the seed's `motorcycle` and `scooter` to `car` and `e-bike`. The
+seed spells Metropolitan as "Metropolitian", but the model uses the correct name. The misspelling
+comes back later as a dirty value in the order system.
 
 ## LA config
 
@@ -66,7 +66,7 @@ as a dirty value of the order system.
 | Vehicle | van 45%, car 40%, e-bike 15% | delivery vans plus gig drivers in cars |
 | Area type | Metropolitan 55%, Urban 35%, Semi-Urban 7%, Other 3% | dense central LA, the Valley and South Bay, the outer edges |
 
-**SLA rule.** It is set when the customer orders:
+**SLA rule.** The SLA is set when the customer orders:
 
 `promised minutes = area base + 3 min per km from the hub to the drop point`
 
@@ -82,11 +82,11 @@ A delivery is late when it takes longer than that.
 The LA bases were fitted on 400,000 simulated LA orders. For each area, the base is the 82nd
 percentile of `minutes − 3 × km` (so 18% are late), rounded up to 5 minutes. With the seed bases,
 Urban parcels were late 25.7% of the time and Semi-Urban only 9.1%. With the LA bases, every area
-is late about as often, so the label does not mostly measure the area type.
+is late about as often. So the label does not mostly measure the area type.
 
 ## Checks
 
-`uv run pytest` runs `tests/test_effect_model.py` (and the reference-data checks below), and
+`uv run pytest` runs `tests/test_effect_model.py` and the reference-data checks below.
 `uv run python -m generator.effect_model` prints the numbers below. Late rates come from 400,000
 simulated orders (4 million for the per-area row).
 
@@ -108,10 +108,10 @@ uv run python -m generator.oms_reference --scale 0.01            # the 1% dev sl
 uv run python -m generator.oms_reference --scale 1.0 --replace   # full scale, replaces what is there
 ```
 
-The loader applies `generator/sql/oms_schema.sql` (`CREATE TABLE IF NOT EXISTS`), then loads
-all four tables with `COPY` in one transaction. If the tables already hold rows, it refuses unless
-`--replace` is given. Every timestamp is `timestamptz`, written in UTC. The same scale and seed
-always give the same rows; the default seed is 2024.
+The loader applies `generator/sql/oms_schema.sql` (`CREATE TABLE IF NOT EXISTS`). Then it loads
+all four tables with `COPY` in one transaction. If the tables already hold rows and `--replace` is
+not given, the loader refuses to run. Every timestamp is `timestamptz`, written in UTC. The same
+scale and random seed always give the same rows. The default random seed is 2024.
 
 | Table | Rows (dev slice) | Rows (full) | What it holds |
 |---|---:|---:|---|
@@ -129,12 +129,12 @@ The 40 hubs are LA neighbourhoods and cities. Each coordinate is the OpenStreetM
 point for the hub's name, looked up once on 2026-10-23. The hand-written guesses they replaced
 were 0.0 to 2.9 km away (median 0.5 km).
 
-Each hub has a weight: its share of couriers, customers and later orders.
+Each hub has a weight: its share of couriers, customers and later orders. Downtown LA has 25%, and
+the top 10 hubs have 60% (the rubric's skew).
 
-- **Skew:** Downtown LA has 25% and the top 10 hubs have 60% (the rubric's skew).
-- **Area type:** an order's area type is its hub's area type. So the weights per area type add up
-  exactly to the LA mix (Metropolitan 55%, Urban 35%, Semi-Urban 7%, Other 3%), the mix the SLA
-  bases were fitted on. A test checks this.
+An order's area type is its hub's area type. So the weights per area type add up exactly to the LA
+mix: Metropolitan 55%, Urban 35%, Semi-Urban 7%, Other 3%. The SLA bases were fitted on this same
+mix. A test checks that the weights add up to it.
 
 Every hub is inside the validation box (latitude 33.70 to 34.82, longitude −118.95 to −117.65) and
 inside the hand-drawn service polygon along the coast.
@@ -143,14 +143,14 @@ inside the hand-drawn service polygon along the coast.
 
 At hiring, each courier gets these attributes:
 
-- **home hub:** by hub weight;
-- **vehicle:** from the LA mix;
-- **employment type:** by vehicle. 85% of van drivers are employees, but only 10% of car drivers
-  and 40% of e-bike riders; the rest are contractors;
-- **rating and age:** from the seed. Ages are 18 or over.
+- a home hub, chosen by hub weight;
+- a vehicle, from the LA mix;
+- an employment type, by vehicle. 85% of van drivers are employees, but only 10% of car drivers
+  and 40% of e-bike riders. The rest are contractors;
+- a rating and an age, from the seed. Ages are 18 or over.
 
-80% were hired between 2022-01-01 and the period start, and 20% during the period. During the
-period these events change a courier:
+80% of couriers were hired between 2022-01-01 and the period start, and 20% during the period.
+During the period, these events change a courier:
 
 | Event | How often | Change |
 |---|---|---|
@@ -159,28 +159,30 @@ period these events change a courier:
 | Vehicle change | 5% | another vehicle, by the mix |
 | Employment change | 3% | employee ↔ contractor |
 
-Each event appends a row to `courier_changes` holding all four tracked attributes after the
-change (home hub, vehicle, rating, employment type). It also overwrites the courier's row in
-`couriers`.
+Each event appends a row to `courier_changes`. The row holds all four tracked attributes after the
+change: home hub, vehicle, rating and employment type. The event also overwrites the courier's row
+in `couriers`.
 
-**No-op rows.** A review that leaves the rating unchanged still writes a row: 294 of 1,093 rows in
-the dev slice (26.5% at full scale). The SCD2 `dim_courier` must compare attributes with the
-previous row, not create a version per audit row.
+**No-op rows.** A review that leaves the rating unchanged still writes a row. These no-op rows are
+294 of 1,093 rows in the dev slice (26.5% at full scale). The SCD2 `dim_courier` must compare
+attributes with the previous row, not create a version per audit row.
 
 For example, courier 146 has 11 rows. It was hired on 2024-03-13 at Downtown LA (hub 1) with a van,
-rating 4.6, as an employee. Then came ten rating reviews: 4.7, 4.7 (no-op), 4.6, 4.7, 4.8, 4.8
+rating 4.6, as an employee. Ten rating reviews followed: 4.7, 4.7 (no-op), 4.6, 4.7, 4.8, 4.8
 (no-op), 4.9, 5.0, 5.0 (no-op), 4.9.
 
 ### Customers
 
-Each customer is placed by these steps:
+The generator places each customer in these steps:
 
-1. **Service hub:** chosen by hub weight.
-2. **Home point:** a distance from the seed (median 9.2 km), in a random direction from the hub.
-3. **Redraw:** points that fall outside the service polygon, in the Pacific, are drawn again.
+1. It chooses the service hub by hub weight.
+2. It takes a distance from the seed (median 9.2 km) and puts the home point at that distance from
+   the hub, in a random direction.
+3. If the point falls outside the service polygon, in the Pacific, the generator draws it again.
 
-The home point is the customer's drop point. 15% sign up during the period, and the rest between
-2019 and the period start. The segment is consumer (88%) or small business (12%).
+The home point is the customer's drop point. 15% of customers sign up during the period, and the
+rest between 2019 and the period start. Each customer's segment is consumer (88%) or small
+business (12%).
 
 ## Orders in `oms`
 
@@ -188,17 +190,17 @@ The home point is the customer's drop point. 15% sign up during the period, and 
 uv run python -m generator.oms_orders --scale 0.01   # needs the reference data loaded first
 ```
 
-Orders are generated one local day at a time, each day with its own random seed, and copied into
-`oms.orders` straight away. So memory stays at one day's rows even at full scale. The generator
-reads the couriers, the courier audit and the customers back from `oms`, so every order points to
-rows that really exist.
+The generator makes the orders one local day at a time, and each day has its own random seed. It
+copies each day's orders into `oms.orders` straight away. So memory holds only one day's rows, even
+at full scale. The generator reads the couriers, the courier audit and the customers back from
+`oms`, so every order points to rows that really exist.
 
 **Volume.**
 
-- **Normal days:** 400,000 orders a day at full scale.
-- **Peak weeks:** 2× in the mid-July sale week (2024-07-15 to 07-21) and 3× in Black Friday week
+- Normal days: 400,000 orders a day at full scale.
+- Peak weeks: 2× in the mid-July sale week (2024-07-15 to 07-21) and 3× in Black Friday week
   (2024-11-25 to 11-30).
-- **Total:** 80.8M orders at full scale, 808,000 in the dev slice.
+- Total: 80.8M orders at full scale, 808,000 in the dev slice.
 
 **How one order is made:**
 
@@ -227,13 +229,13 @@ rows that really exist.
   - On 2024-11-03, when daylight saving time ends, the local hour 01:00 to 01:59 happens twice, so
     that text is ambiguous.
 - **Pickup after midnight.** An order at 23:55 picked up 10 minutes later shows `pickup_time`
-  00:05:xx with the same `order_date`. This rollover is not injected: it comes from the seed's
-  time-of-day pattern.
-- **Legacy spellings.** These are copied from the seed:
+  00:05:xx with the same `order_date`. The generator does not inject this rollover. It comes from
+  the seed's time-of-day pattern.
+- **Legacy spellings.** The generator copies these from the seed:
   - every traffic value has a trailing space (`"Jam "`);
-  - every vehicle and area also has one, except `"van"` and `"Other"`;
+  - every vehicle and area value also has one, except `"van"` and `"Other"`;
   - Metropolitan is written `"Metropolitian "`.
-- **Seed rates, measured from the seed file at run time:**
+- **Seed rates.** The generator measures these rates from the seed file at run time:
 
 | Dirty value | Seed rate | Dev slice in `oms` |
 |---|---:|---:|
@@ -242,13 +244,13 @@ rows that really exist.
 | Store latitude sign-flipped (14% of those also flip the longitude) | 0.43% | 0.432% |
 | Pickup rollover (`pickup_time < order_time`) | 1.89% | 1.83% |
 
-The delivery time is computed from the clean values. The dirty values only change how the row is
-stored, so the label does not depend on them.
+The generator computes the delivery time from the clean values. The dirty values change only how
+the row is stored, so the label does not depend on them.
 
 ### Checks on the dev slice
 
-`tests/test_oms_orders.py` (10 checks on two weeks at 5% scale) and these SQL results on `oms`
-after loading the dev slice:
+`tests/test_oms_orders.py` has 10 checks on two weeks at 5% scale. The table shows SQL results on
+`oms` after the dev slice is loaded:
 
 | Check | Result |
 |---|---|
@@ -265,19 +267,20 @@ after loading the dev slice:
 uv run python -m generator.app_exports --scale 0.01 --workers 6   # after the oms load, same scale and seed
 ```
 
-If export objects already exist, the exporter refuses to run. `--replace` deletes every object
-under `courier_pings/` and `parcel_scans/` first, so no file from an older run is left behind.
+If export objects already exist, the exporter refuses to run. With `--replace`, it first deletes
+every object under `courier_pings/` and `parcel_scans/`. So no file from an older run is left
+behind.
 
-The courier-app team's daily exports are a second source system: Parquet files in the
+The courier-app team's daily exports are a second source system. They are Parquet files in the
 `app-exports` bucket, in one `export_date=YYYY-MM-DD` folder per local day. A `_SUCCESS` marker
 closes each folder.
 
-**No local files.** Each file is built in memory and uploaded with one PUT, so the Mac's disk never
-holds a copy. A single PUT also makes the object's ETag its MD5.
+**No local files.** The exporter makes each file in memory and uploads it with one PUT, so the
+Mac's disk never holds a copy. A single PUT also makes the object's ETag equal to its MD5.
 
-**Matching the database.** The orders are rebuilt in memory from the same seed as the `oms` load,
-so every scan and trip matches a row in `oms.orders`. The exporter stops with an error if the
-rebuilt order count differs from the one in `oms`.
+**Matching the database.** The exporter rebuilds the orders in memory from the same random seed as
+the `oms` load. So every scan and trip matches a row in `oms.orders`. If the rebuilt order count
+differs from the count in `oms`, the exporter stops with an error.
 
 ### GPS pings (`courier_pings/`)
 
@@ -299,12 +302,12 @@ rebuilt order count differs from the one in `oms`.
   `battery_pct` (int8) and `gps_accuracy_m` (float32, metres). The other columns keep their names
   and types.
 - **Rollout.** The rollout starts on 2024-09-01 and reaches every phone in 14 days. Each phone
-  updates on rollout day `(courier_id × 7919) mod 14`, which spreads couriers evenly and is the
-  same in every run.
+  updates on rollout day `(courier_id × 7919) mod 14`. This formula spreads couriers evenly and
+  gives the same day in every run.
 - **Files.** One Parquet file holds one schema. So during the rollout, a group of couriers writes
   two files into the same `export_date` folder: `part-NNNNN.parquet` (v1) and
-  `part-NNNNN-v2.parquet` (v2). A reader of a rollout folder sees both schemas. It loses columns
-  unless it merges them (`mergeSchema`).
+  `part-NNNNN-v2.parquet` (v2). A reader of a rollout folder sees both schemas. If the reader does
+  not merge them (`mergeSchema`), it loses columns.
 
 | Local date | 08-31 | 09-01 | 09-02 | 09-05 | 09-07 | 09-10 | 09-13 | 09-14 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -313,47 +316,51 @@ rebuilt order count differs from the one in `oms`.
 **Duplicates: re-uploaded batches.** Phones upload every 5 minutes (12 pings), and some batches
 are uploaded twice.
 
-- **Rate:** exactly 2.00% extra rows per file, as a share of the original pings, which is 1.96% of
-  all rows.
-- **What a copy looks like:** it has the same `courier_id`, `device_seq` and content as the
-  original and the same `export_date` folder. Only `uploaded_ts` is 10 to 60 minutes later.
-- **Order in the file:** copies follow the originals in the file.
+- Each file has exactly 2.00% extra rows, as a share of the original pings. That is 1.96% of all
+  rows.
+- A copy has the same `courier_id`, `device_seq`, content and `export_date` folder as the
+  original. Only its `uploaded_ts` is 10 to 60 minutes later.
+- In the file, the copies follow the originals.
 
-Dedup keeps one row per `(courier_id, device_seq)`.
+Deduplication keeps one row per `(courier_id, device_seq)`.
 
 The other rules:
 
-- **Shifts.** Every courier hired before the day works a 10-hour local shift and sends a fix every
-  25 s, which is 1,440 pings. Couriers with an even id work 07:00 to 17:00, odd ids 14:00 to 24:00.
-- **Trips.** A shift alternates trips (30 minutes on average) and idle gaps, sized so that 30% of
-  pings are idle and carry a NULL `trip_id`. Each trip takes the courier's next order of the day,
-  in pickup order. That is what the skew benchmark joins on:
-  `pings LEFT JOIN orders ON trip_id = order_id`, where the NULL keys pile up.
-- **Movement.** While on a trip, speed is the vehicle's mean (van 24, car 28, e-bike 16 km/h) times
-  random noise; idle couriers move 0 to 2 km/h. The heading drifts, and a pull toward the hub
-  keeps couriers a median 5.8 km away (95% within 11.4 km). GPS noise is about 8 m.
-- **Files.** One file per 278 couriers per day (278 × 1,440 = 400,320 rows). Each file has its own
-  random seed from (seed, day, file), so files can be built in parallel and in any order.
+- **Shifts.** Every courier hired before the day works a 10-hour local shift. The courier sends a
+  fix every 25 s, which is 1,440 pings. Couriers with an even id work 07:00 to 17:00, and couriers
+  with an odd id work 14:00 to 24:00.
+- **Trips.** A shift alternates trips (30 minutes on average) and idle gaps. The gaps are sized so
+  that 30% of pings are idle and carry a NULL `trip_id`. Each trip takes the courier's next order
+  of the day, in pickup order. The skew benchmark joins on this link:
+  `pings LEFT JOIN orders ON trip_id = order_id`. The NULL keys pile up in this join.
+- **Movement.** On a trip, the speed is the vehicle's mean (van 24, car 28, e-bike 16 km/h) times
+  random noise. Idle couriers move at 0 to 2 km/h. The heading drifts, and a pull toward the hub
+  keeps couriers a median 5.8 km away (95% within 11.4 km). The GPS noise is about 8 m.
+- **Files.** There is one file per 278 couriers per day (278 × 1,440 = 400,320 rows). Each file has
+  its own random seed from (seed, day, file). So the files can be made in parallel and in any order.
 
 ### Parcel scans (`parcel_scans/`)
 
-Three scans per order:
+Each order has three scans:
 
-1. **`at_hub`:** by hub staff, so `courier_id` is NULL. It comes between the order and the pickup.
-2. **`picked_up`:** at the pickup time.
-3. **`delivered`:** at `delivered_ts`.
+1. `at_hub`: hub staff make this scan, so `courier_id` is NULL. It comes between the order and the
+   pickup.
+2. `picked_up`: at the pickup time.
+3. `delivered`: at `delivered_ts`.
 
-Columns: `scan_id`, `order_id`, `courier_id`, `hub_id`, `scan_type`, `scan_ts`, `uploaded_ts`.
-Handhelds upload 1 to 120 s after the scan. A scan is exported on the local date of its `scan_ts`.
-So a parcel delivered after midnight has its `delivered` scan in the next day's folder. Each file
-holds one order day's scans for one export date (`orders-YYYY-MM-DD.parquet`).
+The columns are `scan_id`, `order_id`, `courier_id`, `hub_id`, `scan_type`, `scan_ts`,
+`uploaded_ts`. Handhelds upload 1 to 120 s after the scan. The exporter puts each scan in the folder
+for the local date of its `scan_ts`. So a parcel delivered after midnight has its `delivered` scan
+in the next day's folder. Each file holds one order day's scans for one export date
+(`orders-YYYY-MM-DD.parquet`).
 
 ### Checks
 
-`tests/test_app_exports.py` checks the ping schema and spacing, the shift hours, the idle share, that
-every `trip_id` is one of the courier's own orders, that couriers stay near their hub, the v2
-rollout and both schemas on a rollout day, the duplicates, the scan lifecycle order, and
-byte-identical rebuilds. The dev slice in SeaweedFS:
+`tests/test_app_exports.py` checks the ping schema and spacing, the shift hours and the idle share.
+It checks that every `trip_id` is one of the courier's own orders and that couriers stay near their
+hub. It also checks the v2 rollout and both schemas on a rollout day, the duplicates, the scan
+lifecycle order and byte-identical rebuilds. The table gives the results for the dev slice in
+SeaweedFS:
 
 | Check | Result |
 |---|---|
@@ -367,29 +374,29 @@ byte-identical rebuilds. The dev slice in SeaweedFS:
 | Scans against `oms` (2024-08-15) | 3,107 `delivered` scans, all with the order's courier and `delivered_ts` |
 
 At 18.6 B per row, full scale (about 4.9 billion pings with duplicates) comes to about 91 GB of
-pings. Adding the
-scans (about 4 GB) and `oms` (about 23 GB) gives about 118 GB of source data. The one-day dry run
-fixes the full-scale numbers.
+pings. With the scans (about 4 GB) and `oms` (about 23 GB), the total is about 118 GB of source
+data. The one-day dry run sets the full-scale numbers.
 
 ## Checking the generated data
 
 `uv run python -m generator.check_data --scale 0.01` reads `oms` with SQL and the exports with
-pyarrow. It compares each injected rate with its target and tolerance (29 checks), and exits with
-status 1 if any check fails. The results and the full-scale dry run are in
+pyarrow. It compares each injected rate with its target and tolerance (29 checks). If any check
+fails, it exits with status 1. The results and the full-scale dry run are in
 [data_characteristics.md](data_characteristics.md).
 
 ## Limits
 
-- **Main effects only.** Interactions in the seed (for example weather × traffic) are not kept.
-  The seed itself looks generated, so this loses little. The later `check_data` step compares
-  the generated late rate per factor with the table above.
-- **Rounding moves each area differently.** The bases are rounded up to 5 minutes after fitting,
-  which lowers each area's late rate by a different amount (Semi-Urban 15.7%, Metropolitan
+- **Main effects only.** The model does not keep the interactions in the seed (for example
+  weather × traffic). The seed itself looks generated, so this loses little. The later
+  `check_data` step compares the generated late rate per factor with the table above.
+- **Rounding moves each area differently.** After the fit, the bases are rounded up to 5 minutes.
+  This lowers each area's late rate by a different amount (Semi-Urban 15.7%, Metropolitan
   17.4%). The test accepts 15% to 18% per area.
-- **Courier history starts at the period.** A courier hired before 2024-06-01 has one `hired` row
-  holding their state at the period start; earlier changes are not generated.
+- **Courier history starts at the period.** A courier hired before 2024-06-01 has one `hired` row,
+  which holds the courier's state at the period start. The generator does not make earlier
+  changes.
 - **The service polygon is hand-drawn.** It follows the coast closely enough to keep drops out of
   the ocean, but it includes mountains and parks where nobody lives.
 - **Apple Accelerate warnings.** On macOS, numpy's Accelerate BLAS can raise false
   floating-point warnings in the fit's matrix product. The fit ignores those flags and checks
-  that every residual is finite instead. Its result matches a plain loop to within 1e-13.
+  instead that every residual is finite. Its result matches a plain loop to within 1e-13.
