@@ -14,7 +14,13 @@ check fails the run.
 
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from lakehouse_tasks import DEFAULT_ARGS, PERIOD_START, spark_job
+from lakehouse_tasks import DEFAULT_ARGS, EXPORTS, OMS_TABLES, PERIOD_START, lake, postgres, spark_job
+
+BRONZE = lake("bronze", *[f"raw_{t}" for t in OMS_TABLES + EXPORTS])
+SILVER = lake("silver", "stg_hubs", "stg_customers", "stg_courier_changes", "stg_orders", "stg_courier_pings", "stg_parcel_scans")
+DIMS = lake("gold", "dim_hub", "dim_customer", "dim_date", "dim_zone", "dim_courier")
+FACTS = lake("gold", "fact_delivery", "fact_courier_activity_hourly")
+DWH = postgres("dwh", "dim_date", "dim_hub", "dim_zone", "dim_customer", "dim_courier", "fact_delivery", "obt_delivery")
 
 with DAG(
     dag_id="dp2_transform_validate",
@@ -27,15 +33,28 @@ with DAG(
     tags=["dp2", "silver", "gold", "dwh"],
     doc_md=__doc__,
 ) as dag:
-    silver = spark_job("silver", "dp2_silver.py", [])
-    dims = spark_job("gold_dims", "dp2_gold_dims.py", [])
-    facts = spark_job("gold_facts", "dp2_gold_facts.py", [])
-    warehouse = spark_job("warehouse", "dp2_warehouse.py", [])
+    silver = spark_job("silver", "dp2_silver.py", [], inlets=BRONZE, outlets=SILVER)
+    dims = spark_job(
+        "gold_dims", "dp2_gold_dims.py", [],
+        inlets=lake("silver", "stg_hubs", "stg_customers", "stg_courier_changes"), outlets=DIMS,
+    )
+    facts = spark_job(
+        "gold_facts", "dp2_gold_facts.py", [],
+        inlets=lake("silver", "stg_orders", "stg_courier_pings") + lake("gold", "dim_courier", "dim_hub"), outlets=FACTS,
+    )
+    warehouse = spark_job(
+        "warehouse", "dp2_warehouse.py", [],
+        inlets=DIMS + lake("gold", "fact_delivery"), outlets=DWH,
+    )
     suite = spark_job(
         "validate_suite", "validate.py",
         ["--suite", "dp2", "--ds", "{{ ds }}", "--period-end", "{{ var.value.period_end }}", "--fail-on-error"], retries=0,
+        inlets=SILVER + DIMS + FACTS,
     )
-    scd2 = spark_job("validate_scd2", "check_dim_courier.py", [], retries=0)
+    scd2 = spark_job(
+        "validate_scd2", "check_dim_courier.py", [], retries=0,
+        inlets=lake("gold", "dim_courier") + lake("silver", "stg_courier_changes"),
+    )
     trigger_dp3 = TriggerDagRunOperator(
         task_id="trigger_dp3",
         trigger_dag_id="dp3_features_validate",

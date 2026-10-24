@@ -12,7 +12,9 @@ Runs are not caught up automatically; trigger a day with
 
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from lakehouse_tasks import DEFAULT_ARGS, PERIOD_END, PERIOD_START, spark_job
+from lakehouse_tasks import DEFAULT_ARGS, EXPORTS, OMS_TABLES, PERIOD_END, PERIOD_START, exports, lake, postgres, spark_job
+
+BRONZE = lake("bronze", *[f"raw_{t}" for t in OMS_TABLES + EXPORTS])
 
 with DAG(
     dag_id="dp1_ingest_validate",
@@ -26,10 +28,14 @@ with DAG(
     tags=["dp1", "bronze"],
     doc_md=__doc__,
 ) as dag:
-    ingest = spark_job("ingest_bronze", "dp1_ingest.py", ["--until", "{{ ds }}"])
+    ingest = spark_job(
+        "ingest_bronze", "dp1_ingest.py", ["--until", "{{ ds }}"],
+        inlets=postgres("oms", *OMS_TABLES) + exports(*EXPORTS), outlets=BRONZE,
+    )
     validate = spark_job(
         "validate_bronze", "validate.py",
         ["--suite", "dp1", "--ds", "{{ ds }}", "--period-end", "{{ var.value.period_end }}", "--fail-on-error"], retries=0,
+        inlets=BRONZE,
     )
     trigger_dp2 = TriggerDagRunOperator(
         task_id="trigger_dp2",

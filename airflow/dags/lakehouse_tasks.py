@@ -7,6 +7,7 @@ The driver runs in the scheduler container (client mode); the executors run on s
 from datetime import datetime, timedelta
 
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from datahub_airflow_plugin.entities import Dataset
 
 # Runs go to 2024-12-01: parcels ordered on 2024-11-30 and delivered after midnight are changed, and
 # their scans exported, on 2024-12-01.
@@ -26,8 +27,34 @@ SPARK_CONF = {
 }
 
 
-def spark_job(task_id: str, job: str, args: list[str], retries: int | None = None) -> SparkSubmitOperator:
-    """Return a task that runs jobs/<job> with spark-submit in the one-slot spark pool."""
+OMS_TABLES = ["hubs", "couriers", "courier_changes", "customers", "orders"]
+EXPORTS = ["courier_pings", "parcel_scans"]
+
+
+def lake(zone: str, *tables: str) -> list[Dataset]:
+    """Return lakehouse tables as DataHub datasets, named as the Trino ingestion names them."""
+    return [Dataset("trino", f"delta.{zone}.{t}") for t in tables]
+
+
+def postgres(database: str, *tables: str) -> list[Dataset]:
+    """Return Postgres tables (schema public) as DataHub datasets."""
+    return [Dataset("postgres", f"{database}.public.{t}") for t in tables]
+
+
+def exports(*datasets: str) -> list[Dataset]:
+    """Return the courier-app export folders in SeaweedFS as DataHub datasets."""
+    return [Dataset("s3", f"app-exports/{d}") for d in datasets]
+
+
+def spark_job(
+    task_id: str, job: str, args: list[str], retries: int | None = None,
+    inlets: list[Dataset] | None = None, outlets: list[Dataset] | None = None,
+) -> SparkSubmitOperator:
+    """Return a task that runs jobs/<job> with spark-submit in the one-slot spark pool.
+
+    inlets and outlets are the datasets the job reads and writes; the DataHub plugin sends them as
+    the task's lineage.
+    """
     extra = {} if retries is None else {"retries": retries}
     return SparkSubmitOperator(
         task_id=task_id,
@@ -38,5 +65,7 @@ def spark_job(task_id: str, job: str, args: list[str], retries: int | None = Non
         env_vars=SPARK_ENV,
         conf=SPARK_CONF,
         pool="spark",
+        inlets=inlets or [],
+        outlets=outlets or [],
         **extra,
     )

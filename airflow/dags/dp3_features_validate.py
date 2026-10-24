@@ -9,7 +9,10 @@ checks. Any failed check fails the run.
 """
 
 from airflow import DAG
-from lakehouse_tasks import DEFAULT_ARGS, PERIOD_START, spark_job
+from lakehouse_tasks import DEFAULT_ARGS, PERIOD_START, lake, spark_job
+
+GOLD_IN = lake("gold", "fact_delivery", "fact_courier_activity_hourly", "dim_courier", "dim_hub", "dim_zone", "dim_date")
+FEATURES = lake("gold", "feat_courier_daily", "feat_hub_hourly", "feat_zone_daily")
 
 with DAG(
     dag_id="dp3_features_validate",
@@ -22,10 +25,11 @@ with DAG(
     tags=["dp3", "features"],
     doc_md=__doc__,
 ) as dag:
-    features = spark_job("features", "dp3_features.py", ["--incremental"])
+    features = spark_job("features", "dp3_features.py", ["--incremental"], inlets=GOLD_IN, outlets=FEATURES)
     suite = spark_job(
         "validate_suite", "validate.py",
         ["--suite", "dp3", "--ds", "{{ ds }}", "--period-end", "{{ var.value.period_end }}", "--fail-on-error"], retries=0,
+        inlets=FEATURES,
     )
-    incremental = spark_job("validate_incremental", "check_cdf.py", [], retries=0)
+    incremental = spark_job("validate_incremental", "check_cdf.py", [], retries=0, inlets=FEATURES + GOLD_IN)
     features >> [suite, incremental]

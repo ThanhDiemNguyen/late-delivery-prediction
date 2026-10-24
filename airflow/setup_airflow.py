@@ -28,6 +28,10 @@ def connections() -> list[Connection]:
             conn_id="spark_lakehouse", conn_type="spark", host="spark://spark-master", port=7077,
             description="Spark standalone master", extra=json.dumps({"deploy-mode": "client"}),
         ),
+        Connection(
+            conn_id="datahub_rest_default", conn_type="datahub-rest", host="http://datahub-gms:8080",
+            description="DataHub GMS, where the DataHub plugin sends lineage",
+        ),
     ]
 
 

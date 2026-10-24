@@ -1,7 +1,7 @@
 # DataHub: the platform's catalog, lineage and data quality
 
-DataHub v1.5.0.6 holds the schema of every table in every zone. Lineage from the Airflow
-pipelines and the Great Expectations results follow in the next steps.
+DataHub v1.5.0.6 holds the schema of every table in every zone and the lineage of the Airflow
+pipelines DP1 to DP3. The Great Expectations results follow in the next step.
 
 ## Services (profile `gov`)
 
@@ -78,6 +78,51 @@ A GraphQL search on GMS (`searchAcrossEntities`) lists the datasets by platform 
 | trino | silver | 6 |
 | trino | gold | 10 |
 | postgres | `dwh` | 7 |
+
+## Lineage from Airflow
+
+The DataHub Airflow plugin (`acryl-datahub-airflow-plugin` 1.5.0.17, in the Airflow image) sends
+each pipeline and task to GMS when a task runs:
+
+- a DAG becomes a DataFlow, and a task becomes a DataJob of that flow;
+- a task's `inlets` and `outlets` become the DataJob's inputs and outputs.
+
+Spark jobs have no lineage that the plugin can read, so every `SparkSubmitOperator` declares its
+datasets. The helpers in `airflow/dags/lakehouse_tasks.py` build them with the URNs that the
+recipes ingested:
+
+| Helper | Dataset URN name | Example |
+|---|---|---|
+| `lake(zone, *tables)` | `trino`, `delta.<zone>.<table>` | `delta.silver.stg_orders` |
+| `postgres(db, *tables)` | `postgres`, `<db>.public.<table>` | `oms.public.orders`, `dwh.public.fact_delivery` |
+| `exports(*datasets)` | `s3`, `app-exports/<dataset>` | `app-exports/courier_pings` |
+
+| DAG | Task | Inputs | Outputs |
+|---|---|---|---|
+| `dp1_ingest_validate` | `ingest_bronze` | 5 `oms` tables, 2 app exports | 7 bronze tables |
+| | `validate_bronze` | 7 bronze tables | |
+| `dp2_transform_validate` | `silver` | 7 bronze tables | 6 silver tables |
+| | `gold_dims` | `stg_hubs`, `stg_customers`, `stg_courier_changes` | 5 dimensions |
+| | `gold_facts` | `stg_orders`, `stg_courier_pings`, `dim_courier`, `dim_hub` | 2 facts |
+| | `warehouse` | 5 dimensions, `fact_delivery` | 7 `dwh` tables |
+| | `validate_suite`, `validate_scd2` | the tables they check | |
+| `dp3_features_validate` | `features` | 2 facts, 4 dimensions | 3 `feat_` tables |
+| | `validate_suite`, `validate_incremental` | the tables they check | |
+
+The validate tasks have inputs only: they read and write nothing back. The Airflow connection
+`datahub_rest_default` points the plugin at `http://datahub-gms:8080`. To run Airflow without the
+`gov` profile, set `DATAHUB_ENABLED=false`.
+
+### Checks (2026-10-23)
+
+The chain ran for 2024-11-27 with the plugin on: DP1 in 67 s, DP2 at 346 s, DP3 at 496 s, all
+green. Then a GraphQL query on GMS returned:
+
+- 3 DataFlows and 13 DataJobs. Each Spark task has the inputs and outputs in the table above; the
+  two trigger tasks have none.
+- An upstream lineage search from `dwh.public.fact_delivery` that reaches every zone back to
+  the sources: 6 gold, 5 silver, 7 bronze, the 5 `oms` tables and the 2 app exports. The silver
+  table that does not appear is `stg_parcel_scans`, because no gold job reads it.
 
 ## Pitfalls
 
