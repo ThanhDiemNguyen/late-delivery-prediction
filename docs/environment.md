@@ -192,8 +192,53 @@ defaults", which deletes the disk image. Plug the drive back in, start Docker De
 `docker compose --profile core ps -a`. The generator is deterministic, so raw data can be
 regenerated, and the lakehouse is rebuilt from raw.
 
+## Disk safety for the 100 GB runs
+
+The full-scale data and the Spark jobs that read it share the T9 with everything else. Two limits
+apply: the free space on the SSD, which `Docker.raw` grows into, and the Docker VM's own disk,
+which stops at the 800 GB limit. On 2026-10-24 before the full generation, the SSD had 889 GB free
+and the VM 705 GB, so the VM is the tighter one.
+
+**The watcher (`scripts/disk-watch.sh`)** checks both every 30 s and takes the smaller number.
+Below the threshold (default 50 GB) it does three things:
+
+1. It kills every running Spark application through the master UI
+   (`POST /app/kill/?id=<app>&terminate=true`).
+2. It stops the generator with `pkill -f`, matching `-m generator.(oms_reference|oms_orders|app_exports)`:
+   the `uv` wrapper, its Python process and a shell that runs them.
+3. It exits with status 2.
+
+```bash
+scripts/disk-watch.sh &                      # beside a 100 GB run
+scripts/disk-watch.sh --once                 # one check
+GENERATOR_PATTERN= scripts/disk-watch.sh ... # leave the generator alone
+```
+
+**Check (2026-10-24).** A test application (`disk-watch-test`, two tasks that sleep for 10
+minutes) was running while the full generation loaded `oms`. The watcher ran with
+`--once --threshold-gb 100000` and `GENERATOR_PATTERN=`, so the threshold was certain to trip. It
+printed `killed Spark application app-20261024083026-0109` and exited 2. The master listed the
+application as `KILLED`, and the generator kept running.
+
+**Spark cleanup settings.**
+
+- **Worker** (`SPARK_WORKER_OPTS` in compose): `spark.worker.cleanup.enabled=true`, checked every
+  30 minutes (`interval=1800`), deletes the work folders of applications that ended over an hour
+  ago (`appDataTtl=3600`).
+- **Jobs** (`infra/spark/conf/spark-defaults.conf`): `spark.cleaner.periodicGC.interval 15min`.
+  A long job then deletes the shuffle files of data it no longer references every 15 minutes
+  instead of every 30.
+- **Shuffle files of a finished application:** without an external shuffle service, the
+  standalone worker deletes an application's local folders when it ends. That is Spark's
+  behaviour; it was not measured here.
+
 ## Decisions and pitfalls
 
+- **`pkill` on macOS has no `-E`.** BSD `pgrep` and `pkill` already read the pattern as an extended
+  regular expression, and `-E` is an illegal option. Inside `if`, that failure would only mean
+  "no process stopped". The watcher's first pattern also missed the generator: `uv run` starts
+  `.venv/bin/python3 -m generator...`, which `python -m` does not match. `pgrep -fl` with the final
+  pattern lists the `uv` wrapper, its Python process and the shell that runs them.
 - **SeaweedFS needs about 26 s to stop.** It handles SIGTERM and shuts its volume server, filer
   and master down in order, which took 26 s and 28 s in two measured stops. Docker's default grace
   period is 10 s, after which it sends SIGKILL (exit 137), so the first shutdown on 2026-10-22

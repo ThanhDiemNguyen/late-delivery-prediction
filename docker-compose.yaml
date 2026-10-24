@@ -241,6 +241,8 @@ services:
       <<: *spark-env
       SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      # Delete the work folders of applications that ended over an hour ago, checked every 30 min.
+      SPARK_WORKER_OPTS: -Dspark.worker.cleanup.enabled=true -Dspark.worker.cleanup.interval=1800 -Dspark.worker.cleanup.appDataTtl=3600
     ports:
       - "127.0.0.1:8081:8081"   # worker UI
     volumes: *spark-volumes
