@@ -74,6 +74,7 @@ Sizes are from `docker images`, and the layers behind them from `docker history`
 |---|---:|---:|---:|---|
 | `lastleg/spark:3.5.9` | 2.82 GB | 1.96 GB | 0.86 GB (30%) | The naive build adds the 7 jars with `ADD` and then runs `chmod` on them: that layer (1.28 GB) stores the 405 MB of jars a second time, with the pip packages. The fetch stage downloads them and sets their mode once, and the runtime copies them in one layer. The pip packages are installed with `--target`, without bytecode caches or their test suites. |
 | `lastleg/airflow:2.10.5` | 3.23 GB | 2.31 GB | 0.92 GB (28%) | The naive build starts from the full `apache/airflow` image (1.57 GB), which ships every provider. The rewrite starts from `slim` (0.68 GB) and installs only what the DAGs and the metadata database use, at the full image's versions: postgres 6.0.0, amazon 9.2.0, openlineage 2.0.0, apache-spark 5.0.0 and the DataHub plugin. The drivers' Python is built in its own stage without caches or test suites, and only `bin`, `jars` and `python` of `/opt/spark` are copied (`conf` is mounted). |
+| `lastleg/flink:1.20.5` | 2.06 GB | 1.68 GB | 0.38 GB (18%) | PyFlink has no arm64 wheel, so it is compiled. The naive build installs the compilers and Python headers next to PyFlink, in one 1.22 GB layer. The rewrite compiles the wheels in a first stage. The runtime installs them through a bind mount from that stage, so the wheels are no layer, and keeps only `python3` and `libpython3.10`. The Kafka connector gets its mode in the same `ADD`. |
 
 **Checks of `lastleg/spark:3.5.9` (2026-10-24),** with the master, the worker and the history
 server recreated on it:
@@ -96,6 +97,15 @@ recreated on it:
 - **A task through the new client:** `airflow tasks test dp1_ingest_validate validate_bronze`
   for 2024-11-27 ran spark-submit with the drivers' Python and passed 73 of 73.
 - **Lineage:** the DataHub listener started with `enabled=True` and the GMS address.
+
+**Checks of `lastleg/flink:1.20.5` (2026-10-24),** with the jobmanager and the taskmanager
+recreated on it. The dedup job ran twice in a row on one TaskManager, on the 84,712 events in
+`parcel-scans-replay`. That is the second-job case that the pemja fix covers.
+
+- Both jobs finished.
+- `KEYED PROCESS` received 84,712 records and sent 83,460.
+- The final windows were 32,124, with 83,460 scans, 27,577 delivered and 4,738 late-delivered.
+  Those are the truth's numbers in [streaming.md](streaming.md).
 
 **Pitfall: the DataHub plugin needs the OpenLineage provider.** The first slim build had no
 `apache-airflow-providers-openlineage`. The scheduler then logged `Failed to import plugin

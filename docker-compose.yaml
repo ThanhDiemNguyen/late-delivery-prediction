@@ -474,8 +474,8 @@ services:
   flink-jobmanager:
     build:
       context: ./infra/flink
-      dockerfile: Dockerfile.naive
-    image: lastleg/flink:1.20.5-naive
+      dockerfile: Dockerfile   # Dockerfile.naive builds lastleg/flink:1.20.5-naive, the size baseline
+    image: lastleg/flink:1.20.5
     profiles: [stream]
     command: jobmanager
     depends_on:
@@ -501,7 +501,7 @@ services:
       retries: 12
 
   flink-taskmanager:
-    image: lastleg/flink:1.20.5-naive
+    image: lastleg/flink:1.20.5
     profiles: [stream]
     command: taskmanager
     depends_on:
