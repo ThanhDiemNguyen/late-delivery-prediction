@@ -371,6 +371,13 @@ pings. Adding the
 scans (about 4 GB) and `oms` (about 23 GB) gives about 118 GB of source data. The one-day dry run
 fixes the full-scale numbers.
 
+## Checking the generated data
+
+`uv run python -m generator.check_data --scale 0.01` reads `oms` with SQL and the exports with
+pyarrow. It compares each injected rate with its target and tolerance (28 checks), and exits with
+status 1 if any check fails. The results and the full-scale dry run are in
+[data_characteristics.md](data_characteristics.md).
+
 ## Limits
 
 - **Main effects only.** Interactions in the seed (for example weather × traffic) are not kept.
