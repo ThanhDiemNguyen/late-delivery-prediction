@@ -58,7 +58,7 @@ Start them with `cp .env.example .env` (then change the passwords) and
 │   └── sql/             DDL of the oms tables, applied by the generator
 ├── seed/                the Kaggle seed file (gzipped) and its MIT license
 ├── tests/               pytest checks, run with: uv run pytest
-├── jobs/                Spark jobs (DP1 ingest and validation, DP2 silver and gold dimensions so far), run inside spark-master with spark-submit
+├── jobs/                Spark jobs (DP1 ingest and validation, DP2 silver and gold so far), run inside spark-master with spark-submit
 ├── infra/
 │   ├── postgres/init/   SQL run on the first start of Postgres (creates the databases)
 │   ├── spark/           the Spark image (Dockerfile.naive) and conf/spark-defaults.conf

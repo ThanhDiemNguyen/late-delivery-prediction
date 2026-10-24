@@ -284,6 +284,50 @@ incrementally (481 versions, then 799), and as a full rebuild (799).
 
 `dim_hub` has 40 rows, `dim_customer` 50,000 and `dim_date` 184.
 
+## DP2: gold facts (`jobs/dp2_gold_facts.py`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_gold_facts.py
+```
+
+| Fact | Grain | Keys | Measures | Partitioned by |
+|---|---|---|---|---|
+| `fact_delivery` | one order | `order_id`; `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date` | `distance_km`, `delivery_min`, `promised_min`, `is_late`, plus traffic, weather, vehicle, area, category, `order_hour` | `order_month` |
+| `fact_courier_activity_hourly` | one courier in one local hour | `courier_id`, `hub_id` → `dim_hub`, `date_key` → `dim_date`, `hour_start` | `ping_count`, `km_moved`, `idle_min`, `avg_speed_kmh`, `trips` | `activity_date` |
+
+**Courier version at pickup.** `fact_delivery` joins each order to the `dim_courier` version
+that was valid when the parcel was picked up: `valid_from_ts <= pickup_ts < valid_to_ts`. So a
+rating change after the delivery does not change the courier's rating on that delivery. The label
+is `is_late = delivered_ts > promised_ts`.
+
+**Activity per courier hour.** `fact_courier_activity_hourly` joins the silver pings to `dim_hub`
+for the hub's area type and groups them by courier and local hour:
+
+| Measure | How it is made |
+|---|---|
+| `km_moved` | the sum of the distances between consecutive pings |
+| `idle_min` | 25 s for each ping without a trip |
+| `avg_speed_kmh` | the mean speed of pings on a trip |
+
+**Rebuilds.** `fact_delivery` is rebuilt on each run. The activity fact adds only the ping dates
+it does not have yet, with dynamic partition overwrite.
+
+### Checks on the dev slice (2026-10-23)
+
+The run took 112 s.
+
+| Check | Result |
+|---|---|
+| `fact_delivery` rows | 808,000, one per silver order |
+| foreign-key coverage of `courier_sk`, `hub_id`, `customer_id`, `date_key` | 100.000% each; no NULL `courier_sk` |
+| pickups outside the joined courier version | 0 |
+| courier versions used | 797 of 799, for 200 couriers |
+| `fact_courier_activity_hourly` rows | 335,990 = 33,599 courier-days × 10 shift hours |
+| foreign-key coverage of `courier_id`, `hub_id`, `date_key` | 100.000% each |
+| pings summed in the activity fact | 48,382,560, equal to silver |
+| per courier hour, on average | 18.73 km moved, 17.77 idle minutes, 25.93 km/h on trips |
+| late share in `fact_delivery` | 17.56%; mean delivery 120.9 min against 164.8 min promised |
+
 ### DP2 pitfalls
 
 - **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
