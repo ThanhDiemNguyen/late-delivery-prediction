@@ -73,6 +73,7 @@ Sizes are from `docker images`, and the layers behind them from `docker history`
 | Image | `Dockerfile.naive` | `Dockerfile` | Saved | Where the saving comes from |
 |---|---:|---:|---:|---|
 | `lastleg/spark:3.5.9` | 2.82 GB | 1.96 GB | 0.86 GB (30%) | The naive build adds the 7 jars with `ADD` and then runs `chmod` on them: that layer (1.28 GB) stores the 405 MB of jars a second time, with the pip packages. The fetch stage downloads them and sets their mode once, and the runtime copies them in one layer. The pip packages are installed with `--target`, without bytecode caches or their test suites. |
+| `lastleg/airflow:2.10.5` | 3.23 GB | 2.31 GB | 0.92 GB (28%) | The naive build starts from the full `apache/airflow` image (1.57 GB), which ships every provider. The rewrite starts from `slim` (0.68 GB) and installs only what the DAGs and the metadata database use, at the full image's versions: postgres 6.0.0, amazon 9.2.0, openlineage 2.0.0, apache-spark 5.0.0 and the DataHub plugin. The drivers' Python is built in its own stage without caches or test suites, and only `bin`, `jars` and `python` of `/opt/spark` are copied (`conf` is mounted). |
 
 **Checks of `lastleg/spark:3.5.9` (2026-10-24),** with the master, the worker and the history
 server recreated on it:
@@ -85,6 +86,22 @@ server recreated on it:
   attempt failed before it registered with the master. It started just as a killed application was
   being removed; the cause was not captured, and the rerun passed.
 - **`check_h3.py`** (Sedona against h3) passed.
+
+**Checks of `lastleg/airflow:2.10.5` (2026-10-24),** with the webserver and the scheduler
+recreated on it:
+
+- **Providers:** `airflow providers list` shows amazon 9.2.0, postgres 6.0.0, apache-spark 5.0.0
+  and the DataHub plugin 1.5.0.17.
+- **DAGs:** no import errors, and the 3 DAGs are listed.
+- **A task through the new client:** `airflow tasks test dp1_ingest_validate validate_bronze`
+  for 2024-11-27 ran spark-submit with the drivers' Python and passed 73 of 73.
+- **Lineage:** the DataHub listener started with `enabled=True` and the GMS address.
+
+**Pitfall: the DataHub plugin needs the OpenLineage provider.** The first slim build had no
+`apache-airflow-providers-openlineage`. The scheduler then logged `Failed to import plugin
+acryl-datahub-airflow-plugin: No module named 'openlineage'`. The tasks still passed, but Airflow
+would have sent no lineage. The image now pins openlineage 2.0.0 and its libraries at 1.27.0, as
+in the full image.
 
 ## Idle memory
 

@@ -300,8 +300,8 @@ services:
   airflow-init:
     build:
       context: ./infra/airflow
-      dockerfile: Dockerfile.naive
-    image: lastleg/airflow:2.10.5-naive
+      dockerfile: Dockerfile   # Dockerfile.naive builds lastleg/airflow:2.10.5-naive, the size baseline
+    image: lastleg/airflow:2.10.5
     profiles: [orch]
     user: "185:0"   # the Spark user, so drivers here can write the shared event logs
     depends_on:
@@ -330,7 +330,7 @@ services:
       - ./airflow/setup_airflow.py:/opt/airflow/setup_airflow.py:ro
 
   airflow-webserver:
-    image: lastleg/airflow:2.10.5-naive
+    image: lastleg/airflow:2.10.5
     profiles: [orch]
     user: "185:0"
     command: webserver
@@ -356,7 +356,7 @@ services:
   # with the Python of /opt/driver-python; the executors run on spark-worker and connect back to
   # this hostname.
   airflow-scheduler:
-    image: lastleg/airflow:2.10.5-naive
+    image: lastleg/airflow:2.10.5
     profiles: [orch]
     user: "185:0"
     hostname: airflow-scheduler
