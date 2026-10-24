@@ -8,7 +8,7 @@ starts through `jobs/common.py`, which stops with a clear message if the Spark s
 |---|---|---|---|
 | DP1 | the source systems (`oms`, `app-exports`) | bronze `raw_*` | `dp1_ingest.py` |
 | DP2 | bronze | silver `stg_*`, gold `dim_*` / `fact_*`, warehouse `dwh` | `dp2_silver.py`, then later jobs |
-| DP3 | gold | feature tables `feat_*` | later |
+| DP3 | gold | feature tables `feat_*` | `dp3_features.py` |
 
 ## DP1: ingest into bronze (`jobs/dp1_ingest.py`)
 
@@ -412,6 +412,45 @@ checked like tables. That is how a single-table expectation library checks forei
 | 2024-11-29 (Black Friday, 3× orders) | 60 of 60 passed (43 s) | 0 |
 
 The DP1 suite still passes 73 of 73 on 2024-09-07 after the change.
+
+## DP3: offline feature tables (`jobs/dp3_features.py`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp3_features.py
+```
+
+| Feature table | Entity and grain | Features | Built from |
+|---|---|---|---|
+| `gold.feat_courier_daily` | courier, local day (`feature_date`) | `on_time_rate_30d`: share of the courier's deliveries in the last 30 days that were on time; `deliveries_7d`; `avg_speed_kmh_7d`: speed on trips over the last 7 days, weighted by pings | `fact_delivery`, `fact_courier_activity_hourly` |
+| `gold.feat_hub_hourly` | hub, hour (`hour_start`) | `orders_1h`: orders placed in the hour; `late_rate_7d`: late share of the hub's deliveries in the last 168 hours; `active_couriers_1h` | `fact_delivery`, `fact_courier_activity_hourly` |
+
+Every row has two time columns:
+
+- **`event_timestamp`:** the end of the period the row describes. For a day, that is the next local
+  midnight, in UTC: 07:00 UTC in summer and 08:00 UTC after daylight saving time ends. For an hour,
+  it is the end of the hour.
+- **`created`:** when the job computed the row.
+
+**Point-in-time correctness.** A delivery counts in a feature only once it was delivered, before
+the row's `event_timestamp`. The model's training join (in EDAI-2) takes, for each order, the
+latest feature row with `event_timestamp <= pickup_ts`. That join therefore never sees the order
+being scored or anything after it.
+
+**The grid.** Each table is built on a full grid: every courier from its hiring day, and every
+hub for every hour of the period. Days and hours with no activity are present, with 0 or NULL
+values, and the rolling windows (`rangeBetween` over a day or hour number) never skip a gap.
+
+### Checks on the dev slice (2026-10-23)
+
+| Check | Result |
+|---|---|
+| rows | `feat_courier_daily` 33,836 (couriers × days since hiring); `feat_hub_hourly` 175,760 = 40 hubs × 4,394 hours (183 days × 24, plus the closing hour, plus the extra hour when daylight saving ends) |
+| `DESCRIBE` | both tables have `event_timestamp timestamp` and `created timestamp` |
+| 300 sampled `feat_courier_daily` rows, recomputed directly from `fact_delivery` | 0 mismatches; 0 deliveries at or after `event_timestamp` counted |
+| 300 sampled `feat_hub_hourly` rows, recomputed from deliveries in the 168 hours before `event_timestamp` | 0 mismatches |
+| example | courier 146 on 2024-11-29: on time 93.4% over 30 days, 300 deliveries in 7 days (Black Friday week), 25.1 km/h; `event_timestamp` 2024-11-30 08:00 UTC |
+
+The job took 51 s.
 
 ### DP2 pitfalls
 
