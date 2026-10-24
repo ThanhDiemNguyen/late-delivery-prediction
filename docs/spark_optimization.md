@@ -1,0 +1,186 @@
+# Spark optimization at 100 GB
+
+Each section has five parts:
+
+- the problem in the generated data;
+- what the Spark UI shows about it;
+- the methods tried;
+- the measured results;
+- how the chosen method runs in the Airflow pipelines.
+
+The data is the full-scale generation of 2026-10-24: 4.89 billion pings in 88.82 GB of Parquet,
+and 80.8 million orders ([data_characteristics.md](data_characteristics.md)).
+
+**The cluster.** Spark 3.5.9 standalone, with one worker of 4 cores and one executor of 2 GB
+(`spark.executor.memory 2g`). There are 200 shuffle partitions. The runs are one at a time, on an
+otherwise idle cluster, with `scripts/disk-watch.sh` running beside them
+([environment.md](environment.md#disk-safety-for-the-100-gb-runs)).
+
+**How the runs are measured.** Each job reads its own stages back from the Spark UI's REST API
+(`stage_metrics` in `jobs/common.py`). It records them with the wall time and the result in
+`s3a://lakehouse/_benchmarks/`:
+
+- the tasks of each stage;
+- input, shuffle and spill bytes;
+- the median and the slowest task, both run time and shuffle read.
+
+The screenshots come from the Spark history server (`http://127.0.0.1:18080`).
+
+## Skew: pings LEFT JOIN their trip on `trip_id` (`jobs/skew_benchmark.py`)
+
+**The problem.** A ping on a trip carries the trip's `order_id` in `trip_id`. The 29.55% of pings
+sent between trips carry NULL. Joining pings to their order, for example to know whether the trip
+ended late, is a LEFT JOIN on `trip_id`.
+
+A sort-merge join hash-partitions both sides by the key, and every NULL hashes to the same
+partition. So one task of the 200 gets 29.55% of the pings, while the others share the rest. A
+NULL never matches an order, so all that work only produces rows with NULL order columns.
+
+**Four methods.** They all compute the same checksum over the join result: rows, matched rows,
+pings on late trips, and a hash sum. The runs must agree on it. Broadcast joins are off in all of
+them: the order side has 80.8 million rows, too large to broadcast, and the comparison is about
+the shuffle.
+
+| Method | What it does |
+|---|---|
+| `baseline` | AQE off: a plain sort-merge join |
+| `aqe` | AQE on with its skew-join rule (`spark.sql.adaptive.skewJoin.enabled`). Spark 3.5 can split an oversized partition of the left side of a LEFT OUTER join into tasks of the advisory size |
+| `isolate_nulls` | AQE off. The NULL pings skip the join and are added back with NULL order columns |
+| `salt_nulls` | AQE off. In the join key, a NULL `trip_id` becomes a random negative number from −1 to −1,000, which no order matches, so the NULL rows spread over 1,000 keys. It uses 400 shuffle partitions; the first versions used 64 salts and 200 partitions (see the results) |
+
+```python
+# jobs/skew_benchmark.py
+if method == "isolate_nulls":
+    matched = pings.where(F.col("trip_id").isNotNull()).join(trips, pings.trip_id == trips.order_id, "left")
+    idle = pings.where(F.col("trip_id").isNull()).select(
+        *pings.columns, *[F.lit(None).cast(f.dataType).alias(f.name) for f in trips.schema.fields]
+    )
+    return matched.unionByName(idle)
+if method == "salt_nulls":
+    spread = F.coalesce(F.col("trip_id"), -(F.floor(F.rand(7) * SALTS).cast("long") + 1))
+    salted = pings.withColumn("join_key", spread)
+    return salted.join(trips, salted.join_key == trips.order_id, "left").drop("join_key")
+return pings.join(trips, pings.trip_id == trips.order_id, "left")      # baseline and aqe
+```
+
+**Salting must be in the key itself.** The first salting version put a salt column on both
+sides: a random 1 to 64 on NULL pings, 0 on matched pings, and a literal 0 on every order. On 14
+days, its slowest join task read 1,177 MB, more than the baseline's 807 MB. Spark's optimizer had
+folded the literal: `salt = 0` became a filter after the join instead of a join key. The shuffle
+was then partitioned by `trip_id` alone, so every NULL went to one partition again. The fixed
+version salts only the key of the NULL rows, and the order side keeps a single key.
+
+### What the Spark UI shows: the baseline at 100 GB
+
+The full baseline wrote 36.6 GiB of ping shuffle in its map stage (7.2 minutes). The join stage
+then ran 121 of its 200 tasks, each reading about 146 MB of shuffle.
+
+Task 42 holds every NULL `trip_id`. It ran out of heap: `java.lang.OutOfMemoryError: Java heap
+space`, and the executor exited with code 52, Spark's out-of-memory code. Spark lost that
+executor's shuffle files (`FetchFailedException`), recomputed the map stages and started the join
+stage again. It would have met the same partition with the same memory, so I stopped the run
+after 23.6 minutes (1,413 s), during the second attempt.
+
+![Baseline stages: the join stage failed at 121 of 200 tasks](images/spark/skew-baseline-stages.png)
+
+![Baseline join stage: the successful tasks and the failed ones](images/spark/skew-baseline-join-stage.png)
+
+![Baseline executors: executor 0 lost](images/spark/skew-baseline-executors.png)
+
+### Results on 14 days (333,702,084 pings)
+
+The first sweep ran each method on the first 14 export dates. All four gave the same checksum:
+333,702,084 rows, 235,001,096 matched, 40,402,553 pings on late trips.
+
+| Method | Wall time | Join tasks | Task time, median / slowest | Shuffle read per task, median / largest | Spill, memory / disk |
+|---|---:|---:|---:|---:|---:|
+| baseline | 79.1 s | 200 | 0.3 s / 29.1 s | 17.0 MB / 807.2 MB | 3.81 / 0.78 GB |
+| aqe | 88.7 s | 81 | 1.5 s / 3.6 s | 51.1 MB / 66.5 MB | 16.07 / 2.50 GB |
+| isolate_nulls | 81.1 s | 269 | 0.4 s / 1.7 s | 17.0 MB / 17.3 MB | 0 / 0 |
+| salt_nulls (64 salts) | 76.5 s | 200 | 0.3 s / 2.1 s | 17.1 MB / 64.4 MB | 5.49 / 1.17 GB |
+
+At this size the skew is visible but cheap. The NULL task reads 807 MB, 47 times the median, yet
+it finishes in 29 s, so every method takes about the same time. AQE coalesces the 200 partitions
+into 81, and its extra planning makes it the slowest here.
+
+### Results on 100 GB (4,888,196,724 pings)
+
+| Method | Result | Wall time | Join tasks | Task time, median / slowest | Shuffle read per task, median / largest | Ping shuffle written | Spill, memory / disk |
+|---|---|---:|---:|---:|---:|---:|---:|
+| baseline | **out of memory** on the NULL task; stopped | (23.6 min, not finished) | 200 | | 146 MB / (the NULL task failed) | 36.6 GiB | |
+| aqe | finished | **1,079.6 s (18.0 min)** | 283 | 8.6 s / 14.2 s | 146.5 MB / 148.9 MB | 39.3 GB | 189.3 / 38.1 GB |
+| isolate_nulls | finished | **1,148.2 s (19.1 min)** | 200 (+1,074 for the NULL rows) | 0.7 s / 14.8 s | — / 147.5 MB | **27.8 GB** | **134.2 / 27.1 GB** |
+| salt_nulls, 64 salts | **out of memory** (tasks 21 and 149); stopped | (24.8 min, not finished) | 200 | | | | |
+| salt_nulls, 1,000 salts | **out of memory** (task 6); stopped | (21.7 min, not finished) | 200 | | | 46.1 GB | |
+| salt_nulls, 1,000 salts and 400 shuffle partitions | finished | 1,393.1 s (23.2 min) | 400 | 6.9 s / 14.8 s | 109.7 MB / 220.2 MB | 46.0 GB | 178.3 / 40.6 GB in the join, plus 182.7 / 43.6 GB in the map stage |
+
+The three methods that finished gave the same checksum: 4,888,196,724 rows, 3,443,675,321 matched
+(70.45%), 600,044,168 pings on late trips.
+
+- **AQE** found 1 skewed partition and split it into 84 tasks of the advisory size. That is why
+  the join stage has 283 tasks, and the largest reads 148.9 MB instead of the whole NULL
+  partition. The plan marks the join `SortMergeJoin(skew=true)`. The split has a cost: each of the
+  84 splits reads the matching order partition again, so the order side was read as 114,323,202
+  records for 80,800,000 orders.
+- **NULL isolation** keeps the NULL rows out of the shuffle: 27.8 GB of ping shuffle instead of
+  39.3 GB (−29%), and 29% less spill. It reads the pings twice, once for each side of the union,
+  so on this cluster it ends 69 s behind AQE.
+- **Salting with 64 salts** was enough on 14 days, where each salt held 1.5 million NULL rows. At
+  100 GB each held 22.5 million. A partition that drew one or two salts then held 40 to 60
+  million rows, and its sort ran out of memory. With **1,000 salts** the NULL rows spread evenly,
+  but into every one of the 200 partitions. Each partition then held 24 million rows, 40% more
+  than in the baseline, and the extra 8-byte key added 7 GB of shuffle. The sorts failed again.
+  Salting moves the skewed rows into the shuffle instead of removing them, so it needs more
+  partitions as the data grows. With **400 partitions** it finished, in 23.2 minutes and with the
+  same checksum. It was the slowest of the three that finished. Above 200 partitions the shuffle
+  writer sorts and spills on the map side too, which added 43.6 GB of disk spill there.
+
+![AQE join stage: 283 tasks of about the same size](images/spark/skew-aqe-join-stage.png)
+
+![AQE plan: one skewed partition split into 84](images/spark/skew-aqe-sql-plan.png)
+
+![NULL isolation join stage](images/spark/skew-isolate-join-stage.png)
+
+![Salting join stage, 400 partitions](images/spark/skew-salt-join-stage.png)
+
+### The choice for the pipeline
+
+DP2 keeps **NULL isolation**, with AQE also on (`spark.sql.adaptive.enabled` is on by default in
+Spark 3.5, and the platform does not turn it off).
+
+- **DP2 runs one day at a time.** One full-scale day has a NULL partition of about 64 MB of
+  shuffle: the one-day trial measured a largest task of 64 MB against a median of 8 MB. AQE only
+  splits a partition larger than 256 MB and 5 times the median
+  (`spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes`, `skewedPartitionFactor`), so
+  its rule would not apply to a daily batch. NULL isolation removes the NULL rows from the shuffle
+  at any size.
+- **It also writes 29% less shuffle and spills 29% less.** That matters on a laptop whose disk
+  holds the data too.
+- **AQE stays on** for the joins NULL isolation does not cover. It is the simplest fix when a
+  whole history is rebuilt at once: at 100 GB it finished first, with no code change.
+
+**Integration into Airflow.** `jobs/dp2_gold_facts.py` joins the silver pings to `fact_delivery`
+on `trip_id`, to count the minutes on trips that ended late (`late_trip_min` in
+`fact_courier_activity_hourly`). The idle pings skip that join:
+
+```python
+# jobs/dp2_gold_facts.py, build_fact_activity
+trips = spark.table("gold.fact_delivery").select(F.col("order_id").alias("trip_id"), "is_late")
+idle = F.col("trip_id").isNull()
+pings = pings.where(~idle).join(trips, "trip_id", "left").unionByName(
+    pings.where(idle).withColumn("is_late", F.lit(None).cast("boolean"))
+)
+```
+
+This runs in the `gold_facts` task of the `dp2_transform_validate` DAG
+([airflow.md](airflow.md)), and the DP2 suite checks the new column (`late_trip_min` between 0 and
+60).
+
+**Checked on the dev slice (2026-10-24).** `dp2_gold_facts.py --rebuild` rewrote both facts in
+2.5 minutes, with the new column:
+
+- 335,990 activity rows, as before;
+- `late_trip_min` sums to 2,476,940 minutes, which is 12.29% of all ping minutes. That fits the 70%
+  of pings that are on a trip, times the 17.6% of deliveries that are late (12.4%).
+
+The DP2 suite then passed 62 of 62 expectations for 2024-11-27, the new one included.

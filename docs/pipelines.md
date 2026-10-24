@@ -294,7 +294,7 @@ docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_gold_
 | Fact | Grain | Keys | Measures | Partitioned by |
 |---|---|---|---|---|
 | `fact_delivery` | one order | `order_id`; `courier_sk` → `dim_courier`, `hub_id` → `dim_hub`, `customer_id` → `dim_customer`, `date_key` → `dim_date`, `drop_zone_id` → `dim_zone` | `distance_km`, `delivery_min`, `promised_min`, `is_late`, plus traffic, weather, vehicle, area, category, `order_hour` | `order_month` |
-| `fact_courier_activity_hourly` | one courier in one local hour | `courier_id`, `hub_id` → `dim_hub`, `date_key` → `dim_date`, `hour_start` | `ping_count`, `km_moved`, `idle_min`, `avg_speed_kmh`, `trips` | `activity_date` |
+| `fact_courier_activity_hourly` | one courier in one local hour | `courier_id`, `hub_id` → `dim_hub`, `date_key` → `dim_date`, `hour_start` | `ping_count`, `km_moved`, `idle_min`, `late_trip_min`, `avg_speed_kmh`, `trips` | `activity_date` |
 
 **Courier version at pickup.** `fact_delivery` joins each order to the `dim_courier` version
 that was valid when the parcel was picked up: `valid_from_ts <= pickup_ts < valid_to_ts`. So a
@@ -302,12 +302,17 @@ rating change after the delivery does not change the courier's rating on that de
 is `is_late = delivered_ts > promised_ts`.
 
 **Activity per courier hour.** `fact_courier_activity_hourly` joins the silver pings to `dim_hub`
-for the hub's area type and groups them by courier and local hour:
+for the hub's area type and to `fact_delivery` on `trip_id` for `is_late`, then groups them by
+courier and local hour. About 30% of the pings are idle, with a NULL `trip_id`. In a plain join
+they would all land in one shuffle partition, so they skip the join and are added back with a
+NULL `is_late`. The skew and this fix are measured at 100 GB in
+[spark_optimization.md](spark_optimization.md).
 
 | Measure | How it is made |
 |---|---|
 | `km_moved` | the sum of the distances between consecutive pings |
 | `idle_min` | 25 s for each ping without a trip |
+| `late_trip_min` | 25 s for each ping on a trip that ended late (`fact_delivery.is_late`) |
 | `avg_speed_kmh` | the mean speed of pings on a trip |
 
 **Rebuilds.** `fact_delivery` is merged by `order_id`. An existing order is rewritten only when one

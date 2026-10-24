@@ -202,6 +202,7 @@ SUITES = {
             ("expect_compound_columns_to_be_unique", {"column_list": ["courier_id", "hour_start"]}),
             ("expect_column_values_to_be_between", {"column": "ping_count", "min_value": 1, "max_value": 144}),
             ("expect_column_values_to_be_between", {"column": "idle_min", "min_value": 0, "max_value": 60}),
+            ("expect_column_values_to_be_between", {"column": "late_trip_min", "min_value": 0, "max_value": 60}),
             ("expect_column_values_to_be_between", {"column": "km_moved", "min_value": 0, "max_value": 120}),
         ]),
     ],

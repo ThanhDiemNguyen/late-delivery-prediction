@@ -117,6 +117,7 @@ All detailed documents live in [`docs/`](docs/README.md). This README only summa
 | [airflow.md](docs/airflow.md) | The three DAGs, connections, variables and pool, and the failure drill |
 | [datahub.md](docs/datahub.md) | Schemas, lineage and data quality in DataHub |
 | [streaming.md](docs/streaming.md) | The scan stream and the Flink window job: baseline, allowed lateness, dedup |
+| [spark_optimization.md](docs/spark_optimization.md) | Spark at 100 GB: the skew join, schema evolution and duplicates, with Spark UI screenshots |
 | [storage_optimization.md](docs/storage_optimization.md) | Warehouse indexes and the lakehouse file layout |
 | [novel_h3_sedona.md](docs/novel_h3_sedona.md) | Novel idea 1: H3 delivery zones with Apache Sedona |
 | [novel_cdf_incremental.md](docs/novel_cdf_incremental.md) | Novel idea 2: incremental DP3 from Delta's Change Data Feed |

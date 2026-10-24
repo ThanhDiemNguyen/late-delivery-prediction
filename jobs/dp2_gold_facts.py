@@ -10,8 +10,11 @@ rewrite history. It carries the label: is_late = delivered_ts > promised_ts, and
 (resolution 7, Apache Sedona) of the drop point, which joins to dim_zone.
 
 fact_courier_activity_hourly sums the silver pings per courier and local hour: ping count, km moved
-(between consecutive pings), idle minutes (pings with no trip) and mean speed while on a trip. The
-pings are joined to dim_hub for the hub's area type.
+(between consecutive pings), idle minutes (pings with no trip), minutes on trips that ended late, and
+mean speed while on a trip. The pings are joined to dim_hub for the hub's area type, and to
+fact_delivery on trip_id for is_late. About 30% of the pings are idle, with a NULL trip_id: in that
+join every NULL would land in one shuffle partition, so the idle pings skip the join (a NULL never
+matches) and are added back. docs/spark_optimization.md measures this against the plain join.
 
 Both facts have Delta's Change Data Feed on, so DP3 can read just the rows each run changed
 (novel idea 2, docs/novel_cdf_incremental.md). fact_delivery is therefore merged by order_id, and
@@ -110,6 +113,11 @@ def build_fact_activity(spark: SparkSession, until: str | None, rebuild: bool) -
         print(f"{table}: no new ping date")
         return
     hubs = F.broadcast(spark.table("gold.dim_hub").select("hub_id", "area_type"))
+    trips = spark.table("gold.fact_delivery").select(F.col("order_id").alias("trip_id"), "is_late")
+    idle = F.col("trip_id").isNull()
+    pings = pings.where(~idle).join(trips, "trip_id", "left").unionByName(
+        pings.where(idle).withColumn("is_late", F.lit(None).cast("boolean"))
+    )
     previous = Window.partitionBy("courier_id", "ping_date").orderBy("ping_ts")
     moved = haversine_km(F.lag("lat").over(previous), F.lag("lon").over(previous), F.col("lat"), F.col("lon"))
     local = F.from_utc_timestamp("ping_ts", LA)
@@ -122,6 +130,7 @@ def build_fact_activity(spark: SparkSession, until: str | None, rebuild: bool) -
             F.count("*").alias("ping_count"),
             F.round(F.sum("km_step"), 3).alias("km_moved"),
             F.round(F.sum(F.when(F.col("trip_id").isNull(), PING_INTERVAL_MIN).otherwise(0.0)), 2).alias("idle_min"),
+            F.round(F.sum(F.when(F.col("is_late"), PING_INTERVAL_MIN).otherwise(0.0)), 2).alias("late_trip_min"),
             F.round(F.avg(F.when(F.col("trip_id").isNotNull(), F.col("speed_kmh"))), 2).alias("avg_speed_kmh"),
             F.countDistinct("trip_id").alias("trips"),
         )
