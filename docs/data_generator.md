@@ -265,6 +265,9 @@ after loading the dev slice:
 uv run python -m generator.app_exports --scale 0.01 --workers 6   # after the oms load, same scale and seed
 ```
 
+If export objects already exist, the exporter refuses to run. `--replace` deletes every object
+under `courier_pings/` and `parcel_scans/` first, so no file from an older run is left behind.
+
 The courier-app team's daily exports are a second source system: Parquet files in the
 `app-exports` bucket, in one `export_date=YYYY-MM-DD` folder per local day. A `_SUCCESS` marker
 closes each folder.
@@ -276,7 +279,7 @@ holds a copy. A single PUT also makes the object's ETag its MD5.
 so every scan and trip matches a row in `oms.orders`. The exporter stops with an error if the
 rebuilt order count differs from the one in `oms`.
 
-### GPS pings (`courier_pings/`, schema v1)
+### GPS pings (`courier_pings/`)
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -287,10 +290,38 @@ rebuilt order count differs from the one in `oms`.
 | `ping_ts` | timestamp (UTC) | when the phone took the fix |
 | `lat`, `lon` | float64 | position, 6 decimals |
 | `speed_kmh` | int16 | speed |
-| `app_version` | string | `3.14.2` |
+| `app_version` | string | `3.14.2` (v1) or `4.0.0` (v2) |
 | `uploaded_ts` | timestamp (UTC) | when the phone uploaded it; phones upload every 5 minutes |
 
-The rules:
+**Schema evolution: app v2.**
+
+- **What changes.** v2 replaces `speed_kmh` (int16) with `speed_mps` (float32) and adds
+  `battery_pct` (int8) and `gps_accuracy_m` (float32, metres). The other columns keep their names
+  and types.
+- **Rollout.** The rollout starts on 2024-09-01 and reaches every phone in 14 days. Each phone
+  updates on rollout day `(courier_id × 7919) mod 14`, which spreads couriers evenly and is the
+  same in every run.
+- **Files.** One Parquet file holds one schema. So during the rollout, a group of couriers writes
+  two files into the same `export_date` folder: `part-NNNNN.parquet` (v1) and
+  `part-NNNNN-v2.parquet` (v2). A reader of a rollout folder sees both schemas. It loses columns
+  unless it merges them (`mergeSchema`).
+
+| Local date | 08-31 | 09-01 | 09-02 | 09-05 | 09-07 | 09-10 | 09-13 | 09-14 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| v2 share of pings (dev slice) | 0% | 6.9% | 14.5% | 35.3% | 49.2% | 70.5% | 92.1% | 100% |
+
+**Duplicates: re-uploaded batches.** Phones upload every 5 minutes (12 pings), and some batches
+are uploaded twice.
+
+- **Rate:** exactly 2.00% extra rows per file, as a share of the original pings, which is 1.96% of
+  all rows.
+- **What a copy looks like:** it has the same `courier_id`, `device_seq` and content as the
+  original and the same `export_date` folder. Only `uploaded_ts` is 10 to 60 minutes later.
+- **Order in the file:** copies follow the originals in the file.
+
+Dedup keeps one row per `(courier_id, device_seq)`.
+
+The other rules:
 
 - **Shifts.** Every courier hired before the day works a 10-hour local shift and sends a fix every
   25 s, which is 1,440 pings. Couriers with an even id work 07:00 to 17:00, odd ids 14:00 to 24:00.
@@ -320,20 +351,24 @@ holds one order day's scans for one export date (`orders-YYYY-MM-DD.parquet`).
 ### Checks
 
 `tests/test_app_exports.py` checks the ping schema and spacing, the shift hours, the idle share, that
-every `trip_id` is one of the courier's own orders, that couriers stay near their hub, the scan
-lifecycle order, and byte-identical rebuilds. The dev slice in SeaweedFS:
+every `trip_id` is one of the courier's own orders, that couriers stay near their hub, the v2
+rollout and both schemas on a rollout day, the duplicates, the scan lifecycle order, and
+byte-identical rebuilds. The dev slice in SeaweedFS:
 
 | Check | Result |
 |---|---|
-| Pings | 183 files, 48,382,560 rows, 0.84 GB (17.3 B per row) |
+| Pings | 196 files (13 rollout days have a v1 and a v2 file), 49,350,264 rows, 0.92 GB (18.6 B per row) |
+| Duplicates | 967,704 rows: 2.00% of the 48,382,560 original pings |
 | Scans | 366 files, 2,424,000 rows (3 per order) |
-| Time | 14 s for the whole period with 6 workers |
-| Rerun | all 916 objects have the same ETag (MD5) after a second run |
+| Time | 15 s for the whole period with 6 workers |
+| Rerun | all 929 objects have the same ETag (MD5) after a second run with `--replace` |
+| Without `--replace` | refused: "app-exports already holds 916 export objects" |
 | Pings against `oms` (2024-08-15) | 2,528 trip ids, all found in `oms.orders`, each with the same courier |
 | Scans against `oms` (2024-08-15) | 3,107 `delivered` scans, all with the order's courier and `delivered_ts` |
 
-At 17.3 B per row, full scale (about 4.8 billion pings) comes to about 84 GB of pings. Adding the
-scans (about 4 GB) and `oms` (about 23 GB) gives about 111 GB of source data. The one-day dry run
+At 18.6 B per row, full scale (about 4.9 billion pings with duplicates) comes to about 91 GB of
+pings. Adding the
+scans (about 4 GB) and `oms` (about 23 GB) gives about 118 GB of source data. The one-day dry run
 fixes the full-scale numbers.
 
 ## Limits
