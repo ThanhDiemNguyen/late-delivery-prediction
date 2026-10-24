@@ -7,7 +7,7 @@ starts through `jobs/common.py`, which stops with a clear message if the Spark s
 | Pipeline | From | To | Jobs |
 |---|---|---|---|
 | DP1 | the source systems (`oms`, `app-exports`) | bronze `raw_*` | `dp1_ingest.py` |
-| DP2 | bronze | silver `stg_*`, gold `dim_*` / `fact_*`, warehouse `dwh` | later |
+| DP2 | bronze | silver `stg_*`, gold `dim_*` / `fact_*`, warehouse `dwh` | `dp2_silver.py`, then later jobs |
 | DP3 | gold | feature tables `feat_*` | later |
 
 ## DP1: ingest into bronze (`jobs/dp1_ingest.py`)
@@ -147,6 +147,83 @@ The five failures are exactly the five injected problems:
 | 1% of pings with NULL `courier_id` | `courier_id` not NULL | 2,791 of 277,608 (1.01%) |
 | 0.1% of pings at latitude 0 | `lat` between 32.7 and 35.8 | 248 of 277,608 (0.09%) |
 | 1% of scans with type `"lost"` | `scan_type` in set | 121 of 11,855 (1.02%) |
+
+## DP2: clean bronze into silver (`jobs/dp2_silver.py`)
+
+```bash
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_silver.py             # what is new in bronze
+docker compose exec spark-master /opt/spark/bin/spark-submit /opt/jobs/dp2_silver.py --rebuild   # everything again
+```
+
+Silver has the same grain as bronze, with one row per real thing: one row per order, ping, scan,
+customer and hub.
+
+- **`oms` tables** are merged into silver by key (Delta `MERGE`). Only the bronze rows ingested
+  since the last run take part, and the newest version of each key wins.
+- **Export tables** process only the export dates silver has not seen. They are written with
+  dynamic partition overwrite, so a rerun of a date replaces that date's partition and nothing
+  else.
+
+| Silver table | From | Partitioned by |
+|---|---|---|
+| `stg_hubs`, `stg_customers`, `stg_courier_changes` | the `raw_` table: the latest version of each key | |
+| `stg_orders` | `raw_orders`, cleaned as below | |
+| `stg_courier_pings` | `raw_courier_pings`, deduplicated and unified | `ping_date` (local) |
+| `stg_parcel_scans` | `raw_parcel_scans`, deduplicated by `scan_id` | `scan_date` (local) |
+
+### What silver repairs in orders
+
+| Problem in bronze | Repair |
+|---|---|
+| trailing spaces (`"Jam "`, `"car "`, `"Urban "`) | `trim` |
+| `"Metropolitian"` | corrected to `Metropolitan` |
+| `"NaN "` / `"NaN"` in traffic and weather | NULL |
+| store point (0, 0) or sign-flipped | replaced by the hub's point; `store_point_repaired` marks the row |
+| local `order_date` + `order_time` text | `order_ts` in UTC, read in America/Los_Angeles |
+| `order_time` is `"NaN "` (the null block) | rebuilt from the promise rule: `order_ts = promised_ts − (area base + 3 min × km)`; `order_ts_source = 'promise_rule'` |
+| the repeated hour 01:00 to 01:59 when daylight saving time ends (2024-11-03) | Spark reads such a time as the first (PDT) occurrence; when the promise rule puts the order exactly one hour later, it was the second (PST) occurrence. `order_ts_source = 'standard_time'` |
+| `pickup_time` earlier than `order_time` (picked up after midnight) | `pickup_ts = order_ts + (pickup clock − order clock) mod 24 h`; `pickup_rolled_over` marks the row. A difference over 12 h means the clock went back an hour that night, so 23 h comes off |
+
+Silver also adds `distance_km` (hub to drop point) and `promised_min` (the SLA in minutes).
+
+### What silver repairs in pings
+
+| Problem in bronze | Repair |
+|---|---|
+| re-uploaded batches (same `courier_id`, `device_seq`) | keep the earliest upload of each key (`row_number` over the key, ordered by `uploaded_ts`) |
+| app v1 `speed_kmh` against v2 `speed_mps` | one `speed_kmh` column: `speed_kmh`, or `speed_mps × 3.6`; `schema_version` 1 or 2. v2's `battery_pct` and `gps_accuracy_m` stay, NULL for v1 |
+
+### Checks on the dev slice (2026-10-23)
+
+The first run took 203 s and a rerun 37 s, with nothing new to process. The counts come from
+Trino and `spark-sql`:
+
+| Check | Bronze | Silver |
+|---|---:|---:|
+| orders with a trailing space in traffic | 808,000 | 0 |
+| `NaN` traffic / weather literals | 1,639 / 1,639 | 0 / 0 (1,639 NULL each) |
+| `Metropolitian`; vehicle or area with a trailing space | every Metropolitan row | 0 |
+| store points outside the LA box | 68,210 | 0 (68,210 repaired) |
+| `order_ts` missing | 1,639 (`NaN` text) | 0 (1,639 from the promise rule) |
+| pickups after midnight | 14,786 | 0 wrong; all rolled over |
+| `pickup_ts` equal to the `picked_up` scan | | 808,000 of 808,000 |
+| `order_ts` before the `at_hub` scan | | 808,000 of 808,000 |
+| pings | 49,350,264 | 48,382,560: **967,704 removed, exactly the injected re-uploads** |
+| duplicate ping keys; NULL `speed_kmh` | 967,704; 23,616,000 (v2 rows) | 0; 0 |
+| mean speed, v1 / v2 rows | | 18.60 / 18.49 km/h |
+| scans | 2,424,000 | 2,424,000 (no offline duplicates) |
+| late share | | 17.56%, as in `oms` |
+
+The `picked_up` scans come from a separate source system (the courier-app export). Every rebuilt
+pickup time matching them shows that the rollover repair is right.
+
+### DP2 pitfalls
+
+- **The repeated hour is not tested by data.** No order falls in the repeated hour of 2024-11-03,
+  because the seed has no orders between 01:00 and 07:59 local time. The standard-time rule is in
+  place, but no data row exercises it.
+- **Exact distinct counts belong in Spark.** Trino's 2 GB limit gives about 500 MB per query, which
+  is too little for an exact distinct count over 48 million ping keys.
 
 ### DP1 pitfalls
 
