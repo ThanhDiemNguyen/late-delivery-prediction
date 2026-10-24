@@ -3,12 +3,14 @@
     features             jobs/dp3_features.py --incremental   only what the facts' Change Data Feed changed
     validate_suite       jobs/validate.py --suite dp3         Great Expectations on day ds
     validate_incremental jobs/check_cdf.py                    the incremental tables equal a full recompute
+    publish_assertions                                        the suite's results to DataHub as assertions, pass or fail
 
 Triggered by dp2_transform_validate for the same day once silver and gold have passed their
 checks. Any failed check fails the run.
 """
 
 from airflow import DAG
+from datahub_assertions import publish_assertions
 from lakehouse_tasks import DEFAULT_ARGS, PERIOD_START, lake, spark_job
 
 GOLD_IN = lake("gold", "fact_delivery", "fact_courier_activity_hourly", "dim_courier", "dim_hub", "dim_zone", "dim_date")
@@ -33,3 +35,4 @@ with DAG(
     )
     incremental = spark_job("validate_incremental", "check_cdf.py", [], retries=0, inlets=FEATURES + GOLD_IN)
     features >> [suite, incremental]
+    suite >> publish_assertions("dp3", "validate_suite")

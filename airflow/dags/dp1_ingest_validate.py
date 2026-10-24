@@ -3,6 +3,7 @@
     ingest_bronze    jobs/dp1_ingest.py --until ds   oms rows changed and export dates up to ds
     validate_bronze  jobs/validate.py --suite dp1    Great Expectations on the slice of day ds;
                                                      fails the run if any expectation fails
+    publish_assertions                               the results to DataHub as assertions, pass or fail
     trigger_dp2      starts dp2_transform_validate for the same day, only after validation passed
 
 One run per local day of the period, plus 2024-12-01 for the parcels delivered after midnight.
@@ -12,6 +13,7 @@ Runs are not caught up automatically; trigger a day with
 
 from airflow import DAG
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from datahub_assertions import publish_assertions
 from lakehouse_tasks import DEFAULT_ARGS, EXPORTS, OMS_TABLES, PERIOD_END, PERIOD_START, exports, lake, postgres, spark_job
 
 BRONZE = lake("bronze", *[f"raw_{t}" for t in OMS_TABLES + EXPORTS])
@@ -44,3 +46,4 @@ with DAG(
         reset_dag_run=True,
     )
     ingest >> validate >> trigger_dp2
+    validate >> publish_assertions("dp1", "validate_bronze")
